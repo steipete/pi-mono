@@ -21,7 +21,8 @@ import { TuiRenderer } from "./tui/tui-renderer.js";
 
 // Get version from package.json
 const packageJson = JSON.parse(readFileSync(getPackageJsonPath(), "utf-8"));
-const VERSION = packageJson.version;
+export const VERSION = packageJson.version;
+export const BIN_NAME = process.env.PI_BIN_NAME || "pi";
 
 const defaultModelPerProvider: Record<KnownProvider, string> = {
 	anthropic: "claude-sonnet-4-5",
@@ -864,6 +865,10 @@ async function runRpcMode(agent: Agent, sessionManager: SessionManager): Promise
 
 export async function main(args: string[]) {
 	const parsed = parseArgs(args);
+
+	// Print banner with the invoked binary name
+	const bannerName = BIN_NAME;
+	console.log(chalk.cyan.bold(`${bannerName}`), chalk.gray(`v${VERSION}`));
 
 	if (parsed.help) {
 		printHelp();
