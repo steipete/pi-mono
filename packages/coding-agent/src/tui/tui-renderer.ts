@@ -209,14 +209,6 @@ export class TuiRenderer {
 				name: "jobs",
 				description: "List running/recent jobs; Enter to tail, k to kill",
 			},
-			{
-				name: "tail",
-				description: "Tail a session: /tail <sessionId> [limit]",
-			},
-			{
-				name: "kill",
-				description: "Kill a session: /kill <sessionId>",
-			},
 		];
 
 		// Setup autocomplete for file paths and slash commands
