@@ -39,6 +39,7 @@ export interface Settings {
 	customTools?: string[]; // Array of custom tool file paths
 	skills?: SkillsSettings;
 	terminal?: TerminalSettings;
+	streamingTools?: boolean;
 }
 
 export class SettingsManager {
@@ -127,6 +128,19 @@ export class SettingsManager {
 
 	setTheme(theme: string): void {
 		this.settings.theme = theme;
+		this.save();
+	}
+
+	getStreamingTools(): boolean {
+		if (process.env.PI_STREAMING_TOOLS === "0") return false;
+		if (process.env.PI_STREAMING_TOOLS === "1") return true;
+		if (process.env.PI_STREAMING_TOOLS?.toLowerCase() === "false") return false;
+		if (process.env.PI_STREAMING_TOOLS?.toLowerCase() === "true") return true;
+		return this.settings.streamingTools ?? true;
+	}
+
+	setStreamingTools(enabled: boolean): void {
+		this.settings.streamingTools = enabled;
 		this.save();
 	}
 

@@ -23,7 +23,7 @@ import { SessionManager } from "./core/session-manager.js";
 import { SettingsManager } from "./core/settings-manager.js";
 import { loadSlashCommands } from "./core/slash-commands.js";
 import { buildSystemPrompt } from "./core/system-prompt.js";
-import { allTools, codingTools } from "./core/tools/index.js";
+import { allTools, type ToolName } from "./core/tools/index.js";
 import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.js";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.js";
 import { getChangelogPath, getNewEntries, parseChangelog } from "./utils/changelog.js";
@@ -54,7 +54,30 @@ function configureOAuthStorage(): void {
 		},
 	});
 }
-
+const STREAMING_ONLY_TOOLS: ToolName[] = [
+	"bash_stream",
+	"poll_process",
+	"write_stdin",
+	"kill_process",
+	"list_processes",
+	"get_process_log",
+];
+const NON_STREAMING_ONLY_TOOLS: ToolName[] = ["bash"];
+const DEFAULT_STREAMING_TOOL_NAMES: ToolName[] = [
+	"read",
+	"bash_stream",
+	"edit",
+	"write",
+	"grep",
+	"find",
+	"ls",
+	"poll_process",
+	"write_stdin",
+	"kill_process",
+	"list_processes",
+	"get_process_log",
+];
+const DEFAULT_NON_STREAMING_TOOL_NAMES: ToolName[] = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 /** Check npm registry for new version (non-blocking) */
 async function checkForNewVersion(currentVersion: string): Promise<string | null> {
 	try {
@@ -285,11 +308,32 @@ export async function main(args: string[]) {
 		}
 	}
 
+	// Determine streaming tool mode (CLI flag > env/settings > default true)
+	const streamingToolsEnabled =
+		parsed.streamingTools !== undefined ? parsed.streamingTools : settingsManager.getStreamingTools();
+
+	// Determine which tools to use
+	const defaultToolNames = streamingToolsEnabled ? DEFAULT_STREAMING_TOOL_NAMES : DEFAULT_NON_STREAMING_TOOL_NAMES;
+	const requestedToolNames = parsed.tools ?? defaultToolNames;
+	const filteredToolNames = requestedToolNames.filter((name) => {
+		if (!streamingToolsEnabled && STREAMING_ONLY_TOOLS.includes(name)) {
+			console.error(chalk.yellow(`Skipping tool "${name}" because streaming tools are disabled.`));
+			return false;
+		}
+		if (streamingToolsEnabled && NON_STREAMING_ONLY_TOOLS.includes(name)) {
+			console.error(chalk.yellow(`Skipping tool "${name}" because non-streaming bash is disabled.`));
+			return false;
+		}
+		return true;
+	});
+	const selectedToolNames = filteredToolNames.length > 0 ? filteredToolNames : defaultToolNames;
+	let selectedTools = selectedToolNames.map((name) => allTools[name]);
+
 	// Build system prompt
 	const skillsEnabled = !parsed.noSkills && settingsManager.getSkillsEnabled();
 	const systemPrompt = buildSystemPrompt({
 		customPrompt: parsed.systemPrompt,
-		selectedTools: parsed.tools,
+		selectedTools: selectedToolNames,
 		appendSystemPrompt: parsed.appendSystemPrompt,
 		skillsEnabled,
 	});
@@ -336,10 +380,6 @@ export async function main(args: string[]) {
 			initialThinking = "high";
 		}
 	}
-
-	// Determine which tools to use
-	let selectedTools = parsed.tools ? parsed.tools.map((name) => allTools[name]) : codingTools;
-
 	// Discover and load hooks from:
 	// 1. ~/.pi/agent/hooks/*.ts (global)
 	// 2. cwd/.pi/hooks/*.ts (project-local)
