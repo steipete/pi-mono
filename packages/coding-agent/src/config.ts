@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
-import { dirname, join, resolve } from "path";
+import { basename, dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
 // =============================================================================
@@ -87,7 +87,10 @@ export function getChangelogPath(): string {
 const pkg = JSON.parse(readFileSync(getPackageJsonPath(), "utf-8"));
 
 export const APP_NAME: string = pkg.piConfig?.name || "pi";
-export const BIN_NAME: string = process.env.PI_BIN_NAME || APP_NAME;
+
+// Prefer the invoked binary name (pi, tau, etc.), with env override and APP_NAME fallback
+const invokedBin = basename(process.argv[1] || APP_NAME).replace(/\.(m?js)$/i, "");
+export const BIN_NAME: string = process.env.PI_BIN_NAME || invokedBin || APP_NAME;
 export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
 export const VERSION: string = pkg.version;
 

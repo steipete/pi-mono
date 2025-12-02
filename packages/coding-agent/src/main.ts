@@ -185,7 +185,6 @@ export async function main(args: string[]) {
 	if (isInteractive && !parsed.help) {
 		console.log(chalk.cyan.bold(BIN_NAME), chalk.gray(`v${VERSION}`));
 	}
-
 	if (parsed.help) {
 		printHelp();
 		return;
