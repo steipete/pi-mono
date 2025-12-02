@@ -35,6 +35,7 @@ export class FooterComponent implements Component {
 	private gitWatcher: FSWatcher | null = null;
 	private onBranchChange: (() => void) | null = null;
 	private autoCompactEnabled: boolean = true;
+	private backgroundCount = 0;
 
 	constructor(state: AgentState) {
 		this.state = state;
@@ -89,6 +90,10 @@ export class FooterComponent implements Component {
 
 	updateState(state: AgentState): void {
 		this.state = state;
+	}
+
+	setBackgroundCount(count: number): void {
+		this.backgroundCount = count;
 	}
 
 	invalidate(): void {
@@ -233,6 +238,9 @@ export class FooterComponent implements Component {
 
 		// Add thinking level hint if model supports reasoning and thinking is enabled
 		let rightSide = modelName;
+		if (this.backgroundCount > 0) {
+			rightSide = `${theme.fg("accent", `bg:${this.backgroundCount}`)} ${rightSide}`;
+		}
 		if (this.state.model?.reasoning) {
 			const thinkingLevel = this.state.thinkingLevel || "off";
 			if (thinkingLevel !== "off") {

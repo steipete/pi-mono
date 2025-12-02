@@ -2,7 +2,7 @@ import type { AgentEvent, AgentTool } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { type ChildProcessWithoutNullStreams, spawn } from "child_process";
 import { randomUUID } from "crypto";
-import { addSession, appendOutput, markExited } from "./process-registry.js";
+import { addSession, appendOutput, markBackgrounded, markExited } from "./process-registry.js";
 import { getShellConfig, killProcessTree } from "./shell-utils.js";
 
 const CHUNK_LIMIT = 8 * 1024;
@@ -94,6 +94,7 @@ export const bashTool: AgentTool<typeof bashSchema, BashToolDetails> = {
 			exitCode: undefined as number | null | undefined,
 			exitSignal: undefined as NodeJS.Signals | number | null | undefined,
 			truncated: false,
+			backgrounded: false,
 		};
 		addSession(session);
 
@@ -160,6 +161,7 @@ export const bashTool: AgentTool<typeof bashSchema, BashToolDetails> = {
 				if (yieldTimer) clearTimeout(yieldTimer);
 				if (settled) return;
 				yielded = true;
+				markBackgrounded(session);
 				emitEvent?.({
 					type: "tool_execution_progress",
 					toolCallId,
