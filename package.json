@@ -2,6 +2,9 @@
 	"name": "pi-monorepo",
 	"private": true,
 	"type": "module",
+	"bin": {
+		"tau": "./packages/coding-agent/bin/tau-dev.mjs"
+	},
 	"workspaces": [
 		"packages/*"
 	],
