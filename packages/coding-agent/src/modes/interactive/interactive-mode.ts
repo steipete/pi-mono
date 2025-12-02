@@ -24,7 +24,7 @@ import {
 	visibleWidth,
 } from "@mariozechner/pi-tui";
 import { exec } from "child_process";
-import { APP_NAME, getDebugLogPath, getOAuthPath } from "../../config.js";
+import { BIN_NAME, getDebugLogPath, getOAuthPath } from "../../config.js";
 import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.js";
 import type { LoadedCustomTool, SessionEvent as ToolSessionEvent } from "../../core/custom-tools/index.js";
 import type { HookUIContext } from "../../core/hooks/index.js";
@@ -198,7 +198,7 @@ export class InteractiveMode {
 		if (this.isInitialized) return;
 
 		// Add header
-		const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` v${this.version}`);
+		const logo = theme.bold(theme.fg("accent", BIN_NAME)) + theme.fg("dim", ` v${this.version}`);
 		const instructions =
 			theme.fg("dim", "esc") +
 			theme.fg("muted", " to interrupt") +

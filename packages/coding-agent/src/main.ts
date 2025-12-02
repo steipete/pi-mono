@@ -11,7 +11,7 @@ import { type Args, parseArgs, printHelp } from "./cli/args.js";
 import { processFileArguments } from "./cli/file-processor.js";
 import { listModels } from "./cli/list-models.js";
 import { selectSession } from "./cli/session-picker.js";
-import { getModelsPath, getOAuthPath, VERSION } from "./config.js";
+import { BIN_NAME, getModelsPath, getOAuthPath, VERSION } from "./config.js";
 import { AgentSession } from "./core/agent-session.js";
 import { discoverAndLoadCustomTools, type LoadedCustomTool } from "./core/custom-tools/index.js";
 import { exportFromFile } from "./core/export-html.js";
@@ -181,6 +181,11 @@ export async function main(args: string[]) {
 		return;
 	}
 
+	const isInteractive = !parsed.print && parsed.mode === undefined;
+	if (isInteractive && !parsed.help) {
+		console.log(chalk.cyan.bold(BIN_NAME), chalk.gray(`v${VERSION}`));
+	}
+
 	if (parsed.help) {
 		printHelp();
 		return;
@@ -215,9 +220,6 @@ export async function main(args: string[]) {
 
 	// Process @file arguments
 	const { initialMessage, initialAttachments } = await prepareInitialMessage(parsed);
-
-	// Determine if we're in interactive mode (needed for theme watcher)
-	const isInteractive = !parsed.print && parsed.mode === undefined;
 
 	// Initialize theme (before any TUI rendering)
 	const settingsManager = new SettingsManager();
