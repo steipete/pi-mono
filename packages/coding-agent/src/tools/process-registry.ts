@@ -29,6 +29,7 @@ export interface ProcessSession {
 	exitSignal?: NodeJS.Signals | number | null;
 	exited: boolean;
 	truncated: boolean;
+	backgrounded: boolean;
 }
 
 export interface FinishedSession {
@@ -102,8 +103,14 @@ export function markExited(
 	moveToFinished(session, status);
 }
 
+export function markBackgrounded(session: ProcessSession) {
+	session.backgrounded = true;
+}
+
 function moveToFinished(session: ProcessSession, status: ProcessStatus) {
+	// Only persist backgrounded jobs; foreground-only runs are removed.
 	runningSessions.delete(session.id);
+	if (!session.backgrounded) return;
 	finishedSessions.set(session.id, {
 		id: session.id,
 		command: session.command,
@@ -131,7 +138,7 @@ export function trimWithCap(text: string, max: number) {
 }
 
 export function listRunningSessions() {
-	return Array.from(runningSessions.values());
+	return Array.from(runningSessions.values()).filter((s) => s.backgrounded);
 }
 
 export function listFinishedSessions() {

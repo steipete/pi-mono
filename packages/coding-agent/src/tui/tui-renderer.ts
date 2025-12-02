@@ -27,6 +27,7 @@ import type { SettingsManager } from "../settings-manager.js";
 import { expandSlashCommand, type FileSlashCommand, loadSlashCommands, parseCommandArgs } from "../slash-commands.js";
 import { getEditorTheme, getMarkdownTheme, onThemeChange, setTheme, theme } from "../theme/theme.js";
 import { processTool } from "../tools/index.js";
+import { listRunningSessions } from "../tools/process-registry.js";
 import { AssistantMessageComponent } from "./assistant-message.js";
 import { CustomEditor } from "./custom-editor.js";
 import { DynamicBorder } from "./dynamic-border.js";
@@ -40,6 +41,8 @@ import { ThinkingSelectorComponent } from "./thinking-selector.js";
 import { ToolExecutionComponent } from "./tool-execution.js";
 import { UserMessageComponent } from "./user-message.js";
 import { UserMessageSelectorComponent } from "./user-message-selector.js";
+
+const BACKGROUND_HINT_DELAY_MS = 10_000;
 
 /**
  * TUI renderer for the coding agent
@@ -61,6 +64,7 @@ export class TuiRenderer {
 	private loadingAnimation: Loader | null = null;
 
 	private lastSigintTime = 0;
+	private backgroundHintTimer: NodeJS.Timeout | null = null;
 	private changelogMarkdown: string | null = null;
 	private newVersion: string | null = null;
 
@@ -564,6 +568,7 @@ export class TuiRenderer {
 
 		// Update footer with current stats
 		this.footer.updateState(state);
+		this.refreshBackgroundCount();
 
 		switch (event.type) {
 			case "agent_start":
@@ -578,9 +583,17 @@ export class TuiRenderer {
 					this.ui,
 					(spinner) => theme.fg("accent", spinner),
 					(text) => theme.fg("muted", text),
-					"Working... (esc to interrupt, ctrl+b to background)",
+					"Working... (esc to interrupt)",
 				);
 				this.statusContainer.addChild(this.loadingAnimation);
+				if (this.backgroundHintTimer) {
+					clearTimeout(this.backgroundHintTimer);
+				}
+				this.backgroundHintTimer = setTimeout(() => {
+					if (this.loadingAnimation) {
+						this.loadingAnimation.setMessage("Working... (esc to interrupt, ctrl+b to background)");
+					}
+				}, BACKGROUND_HINT_DELAY_MS);
 				this.ui.requestRender();
 				break;
 
@@ -729,6 +742,10 @@ export class TuiRenderer {
 					this.loadingAnimation = null;
 					this.statusContainer.clear();
 				}
+				if (this.backgroundHintTimer) {
+					clearTimeout(this.backgroundHintTimer);
+					this.backgroundHintTimer = null;
+				}
 				if (this.streamingComponent) {
 					this.chatContainer.removeChild(this.streamingComponent);
 					this.streamingComponent = null;
@@ -855,6 +872,11 @@ export class TuiRenderer {
 			this.clearEditor();
 			this.lastSigintTime = now;
 		}
+	}
+
+	private refreshBackgroundCount(): void {
+		const count = listRunningSessions().length;
+		this.footer.setBackgroundCount(count);
 	}
 
 	private handleCtrlB(): void {
