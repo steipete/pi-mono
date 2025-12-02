@@ -222,6 +222,7 @@ export const bashTool: AgentTool<typeof bashSchema, BashToolDetails> = {
 
 			child.once("error", (err) => {
 				if (yieldTimer) clearTimeout(yieldTimer);
+				markExited(session, null, null, "failed");
 				settle(() => reject(err));
 			});
 		});
