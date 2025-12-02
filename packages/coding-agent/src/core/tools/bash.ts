@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentTool } from "@mariozechner/pi-ai";
+import type { AgentEvent, AgentTool } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { spawn } from "child_process";
 import { getShellConfig, killProcessTree } from "../../utils/shell.js";
@@ -32,10 +32,9 @@ export const bashTool: AgentTool<typeof bashSchema> = {
 	description: `Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
 	parameters: bashSchema,
 	execute: async (
-		_toolCallId: string,
+		toolCallId: string,
 		{ command, timeout }: { command: string; timeout?: number },
-		signal?: AbortSignal,
-		onUpdate?,
+		{ signal, emitEvent }: { signal?: AbortSignal; emitEvent?: (event: AgentEvent) => void } = {},
 	) => {
 		return new Promise((resolve, reject) => {
 			const { shell, args } = getShellConfig();
@@ -94,20 +93,26 @@ export const bashTool: AgentTool<typeof bashSchema> = {
 					chunksBytes -= removed.length;
 				}
 
-				// Stream partial output to callback (truncated rolling buffer)
-				if (onUpdate) {
-					const fullBuffer = Buffer.concat(chunks);
-					const fullText = fullBuffer.toString("utf-8");
-					const truncation = truncateTail(fullText);
-					onUpdate({
-						content: [{ type: "text", text: truncation.content || "" }],
-						details: {
-							truncation: truncation.truncated ? truncation : undefined,
-							fullOutputPath: tempFilePath,
-						},
-					});
-				}
-			};
+					// Stream partial output to callback (truncated rolling buffer)
+					if (emitEvent) {
+						const fullBuffer = Buffer.concat(chunks);
+						const fullText = fullBuffer.toString("utf-8");
+						const truncation = truncateTail(fullText);
+						emitEvent({
+							type: "tool_execution_update",
+							toolCallId,
+							toolName: "bash",
+							args: { command, timeout },
+							partialResult: {
+								content: [{ type: "text", text: truncation.content || "" }],
+								details: {
+									truncation: truncation.truncated ? truncation : undefined,
+									fullOutputPath: tempFilePath,
+								},
+							},
+						});
+					}
+				};
 
 			// Collect stdout and stderr together
 			if (child.stdout) {

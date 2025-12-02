@@ -22,7 +22,7 @@ export const lsTool: AgentTool<typeof lsSchema> = {
 	label: "ls",
 	description: `List directory contents. Returns entries sorted alphabetically, with '/' suffix for directories. Includes dotfiles. Output is truncated to ${DEFAULT_LIMIT} entries or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first).`,
 	parameters: lsSchema,
-	execute: async (_toolCallId: string, { path, limit }: { path?: string; limit?: number }, signal?: AbortSignal) => {
+	execute: async (_toolCallId: string, { path, limit }: { path?: string; limit?: number }, { signal } = {}) => {
 		return new Promise((resolve, reject) => {
 			if (signal?.aborted) {
 				reject(new Error("Operation aborted"));

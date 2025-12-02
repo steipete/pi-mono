@@ -61,7 +61,7 @@ export const grepTool: AgentTool<typeof grepSchema> = {
 			context?: number;
 			limit?: number;
 		},
-		signal?: AbortSignal,
+		{ signal }: { signal?: AbortSignal } = {},
 	) => {
 		return new Promise((resolve, reject) => {
 			if (signal?.aborted) {

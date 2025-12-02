@@ -35,17 +35,17 @@ interface ReadToolDetails {
 }
 
 export function createReadTool(executor: Executor): AgentTool<typeof readSchema> {
-	return {
-		name: "read",
-		label: "read",
-		description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files.`,
-		parameters: readSchema,
-		execute: async (
-			_toolCallId: string,
-			{ path, offset, limit }: { label: string; path: string; offset?: number; limit?: number },
-			signal?: AbortSignal,
-		): Promise<{ content: (TextContent | ImageContent)[]; details: ReadToolDetails | undefined }> => {
-			const mimeType = isImageFile(path);
+		return {
+			name: "read",
+			label: "read",
+			description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files.`,
+			parameters: readSchema,
+			execute: async (
+				_toolCallId: string,
+				{ path, offset, limit }: { label: string; path: string; offset?: number; limit?: number },
+				{ signal }: { signal?: AbortSignal } = {},
+			) => {
+				const mimeType = isImageFile(path);
 
 			if (mimeType) {
 				// Read as image (binary) - use base64

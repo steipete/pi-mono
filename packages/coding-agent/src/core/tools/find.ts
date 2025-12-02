@@ -31,7 +31,7 @@ export const findTool: AgentTool<typeof findSchema> = {
 	execute: async (
 		_toolCallId: string,
 		{ pattern, path: searchDir, limit }: { pattern: string; path?: string; limit?: number },
-		signal?: AbortSignal,
+		{ signal }: { signal?: AbortSignal } = {},
 	) => {
 		return new Promise((resolve, reject) => {
 			if (signal?.aborted) {

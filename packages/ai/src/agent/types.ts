@@ -16,6 +16,13 @@ export interface AgentToolResult<T> {
 	content: (TextContent | ImageContent)[];
 	// Details to be displayed in a UI or logged
 	details: T;
+	// Optional execution status for long-running tools
+	status?: "running" | "completed" | "failed";
+}
+
+export interface ToolExecuteOptions {
+	signal?: AbortSignal;
+	emitEvent?: (event: AgentEvent) => void;
 }
 
 // Callback for streaming tool execution updates
@@ -28,8 +35,7 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
 	execute: (
 		toolCallId: string,
 		params: Static<TParameters>,
-		signal?: AbortSignal,
-		onUpdate?: AgentToolUpdateCallback<TDetails>,
+		options?: ToolExecuteOptions,
 	) => Promise<AgentToolResult<TDetails>>;
 }
 
@@ -69,6 +75,22 @@ export type AgentEvent =
 			toolName: string;
 			result: AgentToolResult<any>;
 			isError: boolean;
+	  }
+	// Emitted while a tool is still running but streaming output
+	| {
+			type: "tool_execution_output";
+			toolCallId: string;
+			stream: "stdout" | "stderr";
+			chunk: string;
+	  }
+	// Emitted when a tool yields control but keeps running in the background
+	| {
+			type: "tool_execution_progress";
+			toolCallId: string;
+			sessionId: string;
+			pid?: number;
+			startedAt: number;
+			tail?: string;
 	  }
 	// Emitted when a full turn completes
 	| { type: "turn_end"; message: AssistantMessage; toolResults: ToolResultMessage[] }

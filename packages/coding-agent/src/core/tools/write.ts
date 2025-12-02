@@ -15,7 +15,7 @@ export const writeTool: AgentTool<typeof writeSchema> = {
 	description:
 		"Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
 	parameters: writeSchema,
-	execute: async (_toolCallId: string, { path, content }: { path: string; content: string }, signal?: AbortSignal) => {
+	execute: async (_toolCallId: string, { path, content }: { path: string; content: string }, { signal } = {}) => {
 		const absolutePath = resolvePath(expandPath(path));
 		const dir = dirname(absolutePath);
 
