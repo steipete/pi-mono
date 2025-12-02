@@ -1,11 +1,26 @@
 import type { ChildProcessWithoutNullStreams } from "child_process";
 
+const DEFAULT_JOB_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const MIN_JOB_TTL_MS = 60 * 1000; // 1 minute
+const MAX_JOB_TTL_MS = 3 * 60 * 60 * 1000; // 3 hours
+
+function clampTtl(value: number | undefined) {
+	if (!value || Number.isNaN(value)) return DEFAULT_JOB_TTL_MS;
+	return Math.min(Math.max(value, MIN_JOB_TTL_MS), MAX_JOB_TTL_MS);
+}
+
+const JOB_TTL_MS = clampTtl(Number.parseInt(process.env.PI_BASH_JOB_TTL_MS ?? "", 10));
+
+export type ProcessStatus = "running" | "completed" | "failed" | "killed";
+
 export interface ProcessSession {
 	id: string;
+	command: string;
 	child: ChildProcessWithoutNullStreams;
 	startedAt: number;
 	cwd?: string;
 	maxOutputChars: number;
+	totalOutputChars: number;
 	pendingStdout: string[];
 	pendingStderr: string[];
 	aggregated: string;
@@ -13,20 +28,45 @@ export interface ProcessSession {
 	exitCode?: number | null;
 	exitSignal?: NodeJS.Signals | number | null;
 	exited: boolean;
+	truncated: boolean;
 }
 
-const sessions = new Map<string, ProcessSession>();
+export interface FinishedSession {
+	id: string;
+	command: string;
+	startedAt: number;
+	endedAt: number;
+	cwd?: string;
+	status: ProcessStatus;
+	exitCode?: number | null;
+	exitSignal?: NodeJS.Signals | number | null;
+	aggregated: string;
+	tail: string;
+	truncated: boolean;
+	totalOutputChars: number;
+}
+
+const runningSessions = new Map<string, ProcessSession>();
+const finishedSessions = new Map<string, FinishedSession>();
+
+let sweeper: NodeJS.Timer | null = null;
 
 export function addSession(session: ProcessSession) {
-	sessions.set(session.id, session);
+	runningSessions.set(session.id, session);
+	startSweeper();
 }
 
 export function getSession(id: string) {
-	return sessions.get(id);
+	return runningSessions.get(id);
+}
+
+export function getFinishedSession(id: string) {
+	return finishedSessions.get(id);
 }
 
 export function deleteSession(id: string) {
-	sessions.delete(id);
+	runningSessions.delete(id);
+	finishedSessions.delete(id);
 }
 
 export function appendOutput(session: ProcessSession, stream: "stdout" | "stderr", chunk: string) {
@@ -34,7 +74,10 @@ export function appendOutput(session: ProcessSession, stream: "stdout" | "stderr
 	session.pendingStderr ??= [];
 	const buffer = stream === "stdout" ? session.pendingStdout : session.pendingStderr;
 	buffer.push(chunk);
-	session.aggregated = trimWithCap(session.aggregated + chunk, session.maxOutputChars);
+	session.totalOutputChars += chunk.length;
+	const aggregated = trimWithCap(session.aggregated + chunk, session.maxOutputChars);
+	session.truncated = session.truncated || aggregated.length < session.aggregated.length + chunk.length;
+	session.aggregated = aggregated;
 	session.tail = tail(session.aggregated, 2000);
 }
 
@@ -50,10 +93,31 @@ export function markExited(
 	session: ProcessSession,
 	exitCode: number | null,
 	exitSignal: NodeJS.Signals | number | null,
+	status: ProcessStatus,
 ) {
 	session.exited = true;
 	session.exitCode = exitCode;
 	session.exitSignal = exitSignal;
+	session.tail = tail(session.aggregated, 2000);
+	moveToFinished(session, status);
+}
+
+function moveToFinished(session: ProcessSession, status: ProcessStatus) {
+	runningSessions.delete(session.id);
+	finishedSessions.set(session.id, {
+		id: session.id,
+		command: session.command,
+		startedAt: session.startedAt,
+		endedAt: Date.now(),
+		cwd: session.cwd,
+		status,
+		exitCode: session.exitCode,
+		exitSignal: session.exitSignal,
+		aggregated: session.aggregated,
+		tail: session.tail,
+		truncated: session.truncated,
+		totalOutputChars: session.totalOutputChars,
+	});
 }
 
 export function tail(text: string, max = 2000) {
@@ -66,6 +130,29 @@ export function trimWithCap(text: string, max: number) {
 	return text.slice(text.length - max);
 }
 
-export function listSessions() {
-	return Array.from(sessions.values());
+export function listRunningSessions() {
+	return Array.from(runningSessions.values());
+}
+
+export function listFinishedSessions() {
+	return Array.from(finishedSessions.values());
+}
+
+export function clearFinished() {
+	finishedSessions.clear();
+}
+
+function pruneFinishedSessions() {
+	const cutoff = Date.now() - JOB_TTL_MS;
+	for (const [id, session] of finishedSessions.entries()) {
+		if (session.endedAt < cutoff) {
+			finishedSessions.delete(id);
+		}
+	}
+}
+
+function startSweeper() {
+	if (sweeper) return;
+	sweeper = setInterval(pruneFinishedSessions, Math.max(30_000, JOB_TTL_MS / 6));
+	sweeper.unref?.();
 }

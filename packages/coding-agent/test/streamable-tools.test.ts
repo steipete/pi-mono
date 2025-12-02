@@ -1,6 +1,12 @@
 import type { AgentEvent } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
-import { bashStreamTool, pollProcessTool, writeStdinTool } from "../src/tools/index.js";
+import {
+	bashStreamTool,
+	getProcessLogTool,
+	listProcessesTool,
+	pollProcessTool,
+	writeStdinTool,
+} from "../src/tools/index.js";
 
 function sleep(ms: number) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -71,5 +77,35 @@ describe("streamable bash tools", () => {
 		ac.abort();
 
 		await expect(promise).rejects.toThrow(/aborted|signal/i);
+	});
+
+	it("lists running and finished sessions and fetches logs", async () => {
+		// start a command that will yield quickly
+		const start = await bashStreamTool.execute(
+			"call-list-1",
+			{
+				command: "printf running && sleep 1 && printf done",
+				yieldMs: 20,
+			},
+			{ emitEvent: () => {} },
+		);
+
+		expect(start.details.status).toBe("running");
+		const sessionId = (start.details as any).sessionId as string;
+
+		// Allow completion
+		await sleep(300);
+		await pollProcessTool.execute("call-list-1-poll", { sessionId });
+
+		const list = await listProcessesTool.execute("call-list-1-list", { limit: 5 });
+		const sessions = (list.details as any).sessions as any[];
+		expect(Array.isArray(sessions)).toBe(true);
+		const match = sessions.find((s) => s.sessionId === sessionId);
+		expect(match).toBeDefined();
+		expect(match?.status === "completed" || match?.status === "failed").toBe(true);
+
+		const log = await getProcessLogTool.execute("call-list-1-log", { sessionId, limit: 200 });
+		const logText = (log.content?.find((c) => (c as any).type === "text") as any)?.text as string;
+		expect(logText).toContain("running");
 	});
 });

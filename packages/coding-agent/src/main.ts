@@ -317,6 +317,8 @@ const toolDescriptions: Record<ToolName, string> = {
 	poll_process: "Fetch output or completion status for a running bash_stream session",
 	write_stdin: "Send input to a running bash_stream session",
 	kill_process: "Force-terminate a running bash_stream session",
+	list_processes: "List running and recently finished bash_stream sessions",
+	get_process_log: "Fetch buffered output for a session (paged)",
 };
 
 function buildSystemPrompt(customPrompt?: string, selectedTools?: ToolName[]): string {

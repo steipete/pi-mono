@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Agent, AgentEvent, AgentState, ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage, Message, Model } from "@mariozechner/pi-ai";
+import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@mariozechner/pi-ai";
 import type { SlashCommand } from "@mariozechner/pi-tui";
 import {
 	CombinedAutocompleteProvider,
@@ -24,12 +24,14 @@ import { getApiKeyForModel, getAvailableModels, invalidateOAuthCache } from "../
 import { listOAuthProviders, login, logout } from "../oauth/index.js";
 import type { SessionManager } from "../session-manager.js";
 import type { SettingsManager } from "../settings-manager.js";
-import { expandSlashCommand, type FileSlashCommand, loadSlashCommands } from "../slash-commands.js";
+import { expandSlashCommand, type FileSlashCommand, loadSlashCommands, parseCommandArgs } from "../slash-commands.js";
 import { getEditorTheme, getMarkdownTheme, onThemeChange, setTheme, theme } from "../theme/theme.js";
+import { getProcessLogTool, killProcessTool, listProcessesTool } from "../tools/index.js";
 import { AssistantMessageComponent } from "./assistant-message.js";
 import { CustomEditor } from "./custom-editor.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { FooterComponent } from "./footer.js";
+import { JobsSelectorComponent } from "./jobs-selector.js";
 import { ModelSelectorComponent } from "./model-selector.js";
 import { OAuthSelectorComponent } from "./oauth-selector.js";
 import { QueueModeSelectorComponent } from "./queue-mode-selector.js";
@@ -79,6 +81,10 @@ export class TuiRenderer {
 
 	// Theme selector
 	private themeSelector: ThemeSelectorComponent | null = null;
+
+	// Jobs selector
+	private jobsSelector: JobsSelectorComponent | null = null;
+	private jobsRefreshTimer: NodeJS.Timeout | null = null;
 
 	// Model selector
 	private modelSelector: ModelSelectorComponent | null = null;
@@ -425,6 +431,24 @@ export class TuiRenderer {
 				return;
 			}
 
+			if (text === "/jobs") {
+				await this.handleJobsCommand();
+				this.editor.setText("");
+				return;
+			}
+
+			if (text.startsWith("/tail")) {
+				await this.handleTailCommand(text);
+				this.editor.setText("");
+				return;
+			}
+
+			if (text.startsWith("/kill")) {
+				await this.handleKillCommand(text);
+				this.editor.setText("");
+				return;
+			}
+
 			// Check for file-based slash commands
 			text = expandSlashCommand(text, this.fileCommands);
 
@@ -668,7 +692,8 @@ export class TuiRenderer {
 
 			case "tool_execution_output":
 			case "tool_execution_progress": {
-				// Streaming updates are currently not rendered in the TUI; ignore.
+				// Refresh jobs list when progress arrives so tails/runtime stay fresh
+				this.scheduleJobsRefresh();
 				break;
 			}
 
@@ -962,6 +987,126 @@ export class TuiRenderer {
 		}
 
 		this.ui.requestRender();
+	}
+
+	private async handleJobsCommand(options: { silent?: boolean } = {}): Promise<void> {
+		const { silent } = options;
+		try {
+			const result = await listProcessesTool.execute("tui/list_processes", { limit: 50 });
+			const sessions: any[] = (result.details as any).sessions ?? [];
+			const items =
+				sessions.map((s) => ({
+					sessionId: s.sessionId,
+					label: `${s.sessionId.slice(0, 8)} ${s.status} ${formatDuration(Math.max(0, s.runtimeMs ?? 0))}`,
+					description: truncateMiddle(s.command ?? "", 80),
+				})) ?? [];
+			if (this.jobsSelector) {
+				this.jobsSelector.updateItems(items);
+			} else {
+				this.showJobsSelector(items);
+			}
+
+			if (!silent) {
+				const listText = extractTextContent(result.content);
+				if (listText) {
+					this.chatContainer.addChild(new Spacer(1));
+					this.chatContainer.addChild(new Text(theme.fg("dim", listText)));
+					this.ui.requestRender();
+				}
+			}
+		} catch (err: any) {
+			this.showError(`Failed to list jobs: ${err.message || String(err)}`);
+		}
+	}
+
+	private async handleTailCommand(text: string): Promise<void> {
+		const args = parseCommandArgs(text.slice("/tail".length).trim());
+		const sessionId = args[0];
+		const limit = args[1] ? Number.parseInt(args[1], 10) || undefined : undefined;
+		if (!sessionId) {
+			this.showError("Usage: /tail <sessionId> [limit]");
+			return;
+		}
+		await this.showTailForSession(sessionId, limit);
+	}
+
+	private async handleKillCommand(text: string): Promise<void> {
+		const args = parseCommandArgs(text.slice("/kill".length).trim());
+		const sessionId = args[0];
+		if (!sessionId) {
+			this.showError("Usage: /kill <sessionId>");
+			return;
+		}
+		try {
+			const result = await killProcessTool.execute("tui/kill_process", { sessionId });
+			const message = extractTextContent(result.content) || `Kill sent to ${sessionId}`;
+			this.chatContainer.addChild(new Spacer(1));
+			this.chatContainer.addChild(new Text(theme.fg("warning", message)));
+			this.ui.requestRender();
+		} catch (err: any) {
+			this.showError(`Failed to kill ${sessionId}: ${err.message || String(err)}`);
+		}
+	}
+
+	private async showTailForSession(sessionId: string, limit?: number): Promise<void> {
+		try {
+			const result = await getProcessLogTool.execute("tui/get_process_log", {
+				sessionId,
+				offset: 0,
+				limit: limit ?? 4000,
+			});
+			const text = extractTextContent(result.content) || "(no output)";
+			this.chatContainer.addChild(new Spacer(1));
+			this.chatContainer.addChild(new Text(theme.fg("muted", `Log for ${sessionId.slice(0, 8)}`), 1, 0));
+			this.chatContainer.addChild(new Markdown(text, 1, 0, getMarkdownTheme()));
+			this.ui.requestRender();
+		} catch (err: any) {
+			this.showError(`Failed to fetch log for ${sessionId}: ${err.message || String(err)}`);
+		}
+	}
+
+	private showJobsSelector(items: { sessionId: string; label: string; description?: string }[]): void {
+		this.jobsSelector = new JobsSelectorComponent(
+			items,
+			(sessionId) => {
+				this.hideJobsSelector();
+				void this.showTailForSession(sessionId);
+			},
+			() => this.hideJobsSelector(),
+			(sessionId) => void this.killFromJobsSelector(sessionId),
+		);
+		this.editorContainer.clear();
+		this.editorContainer.addChild(this.jobsSelector);
+		const select = this.jobsSelector.getSelectList();
+		if (select) {
+			this.ui.setFocus(select);
+		} else {
+			// No jobs; keep focus on editor
+			this.ui.setFocus(this.editor);
+		}
+		this.ui.requestRender();
+	}
+
+	private hideJobsSelector(): void {
+		if (!this.jobsSelector) return;
+		this.editorContainer.clear();
+		this.editorContainer.addChild(this.editor);
+		this.jobsSelector = null;
+		this.ui.setFocus(this.editor);
+		this.ui.requestRender();
+	}
+
+	private killFromJobsSelector(sessionId: string): void {
+		void this.handleKillCommand(`/kill ${sessionId}`);
+	}
+
+	private scheduleJobsRefresh(): void {
+		if (!this.jobsSelector) return;
+		if (this.jobsRefreshTimer) return;
+		this.jobsRefreshTimer = setTimeout(() => {
+			this.jobsRefreshTimer = null;
+			void this.handleJobsCommand({ silent: true });
+		}, 300);
 	}
 
 	clearEditor(): void {
@@ -1606,4 +1751,25 @@ export class TuiRenderer {
 			this.isInitialized = false;
 		}
 	}
+}
+
+function formatDuration(ms: number): string {
+	if (ms < 1000) return `${ms}ms`;
+	const seconds = Math.floor(ms / 1000);
+	if (seconds < 60) return `${seconds}s`;
+	const minutes = Math.floor(seconds / 60);
+	const rem = seconds % 60;
+	return `${minutes}m${rem.toString().padStart(2, "0")}s`;
+}
+
+function truncateMiddle(str: string, max: number): string {
+	if (!str) return "";
+	if (str.length <= max) return str;
+	const half = Math.floor((max - 3) / 2);
+	return `${str.slice(0, half)}...${str.slice(str.length - half)}`;
+}
+
+function extractTextContent(content?: (TextContent | ImageContent)[]): string {
+	const textBlock = content?.find((c) => (c as any).type === "text") as TextContent | undefined;
+	return textBlock?.text ?? "";
 }
