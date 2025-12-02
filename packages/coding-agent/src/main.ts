@@ -1,12 +1,11 @@
 import { Agent, type Attachment, ProviderTransport, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { Api, CompactionResult, KnownProvider, Model } from "@mariozechner/pi-ai";
+import type { Api, KnownProvider, Model } from "@mariozechner/pi-ai";
 import { ProcessTerminal, TUI } from "@mariozechner/pi-tui";
 import chalk from "chalk";
 import { existsSync, readFileSync, statSync } from "fs";
 import { homedir } from "os";
-import { extname, join, resolve } from "path";
+import { basename, extname, join, resolve } from "path";
 import { getChangelogPath, getNewEntries, parseChangelog } from "./changelog.js";
-import { setupCompaction } from "./compaction.js";
 import { exportFromFile } from "./export-html.js";
 import { findModel, getApiKeyForModel, getAvailableModels } from "./model-config.js";
 import { getPackageJsonPath, getReadmePath } from "./paths.js";
@@ -22,7 +21,10 @@ import { TuiRenderer } from "./tui/tui-renderer.js";
 // Get version from package.json
 const packageJson = JSON.parse(readFileSync(getPackageJsonPath(), "utf-8"));
 export const VERSION = packageJson.version;
-export const BIN_NAME = process.env.PI_BIN_NAME || "pi";
+
+// Derive binary name from the invoked executable (pi, tau, etc.)
+const invokedBin = basename(process.argv[1] || "pi").replace(/\.(m?js)$/i, "");
+export const BIN_NAME = invokedBin || "pi";
 
 const defaultModelPerProvider: Record<KnownProvider, string> = {
 	anthropic: "claude-sonnet-4-5",
@@ -710,7 +712,6 @@ async function runInteractiveMode(
 	initialMessage?: string,
 	initialAttachments?: Attachment[],
 	fdPath: string | null = null,
-	onCompact?: () => Promise<CompactionResult>,
 ): Promise<void> {
 	const renderer = new TuiRenderer(
 		agent,
@@ -721,7 +722,6 @@ async function runInteractiveMode(
 		newVersion,
 		scopedModels,
 		fdPath,
-		onCompact,
 	);
 
 	// Initialize TUI (subscribes to agent events internally)
@@ -865,10 +865,6 @@ async function runRpcMode(agent: Agent, sessionManager: SessionManager): Promise
 
 export async function main(args: string[]) {
 	const parsed = parseArgs(args);
-
-	// Print banner with the invoked binary name
-	const bannerName = BIN_NAME;
-	console.log(chalk.cyan.bold(`${bannerName}`), chalk.gray(`v${VERSION}`));
 
 	if (parsed.help) {
 		printHelp();
@@ -1169,9 +1165,6 @@ export async function main(args: string[]) {
 		}),
 	});
 
-	const compaction = setupCompaction(agent);
-	agent.setPreprocessor(compaction.preprocessor);
-
 	// If initial thinking was requested but model doesn't support it, silently reset to off
 	if (initialThinking !== "off" && initialModel && !initialModel.reasoning) {
 		agent.setThinkingLevel("off");
@@ -1295,7 +1288,6 @@ export async function main(args: string[]) {
 			initialMessage,
 			initialAttachments,
 			fdPath,
-			compaction.compactNow,
 		);
 	} else {
 		// Non-interactive mode (--print flag or --mode flag)
