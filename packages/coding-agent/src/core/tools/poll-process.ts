@@ -24,13 +24,14 @@ export const pollProcessTool: AgentTool<typeof pollSchema> = {
 		const { stdout, stderr } = drainSession(session);
 		const exited = session.exited;
 		const exitCode = session.exitCode ?? 0;
+		const exitSignal = session.exitSignal ?? undefined;
 		const aggregated = session.aggregated;
 
 		if (exited) {
 			deleteSession(sessionId);
 		}
 
-		const status = exited ? (exitCode === 0 ? "completed" : "failed") : "running";
+		const status = exited ? (exitCode === 0 && exitSignal == null ? "completed" : "failed") : "running";
 		const parts: string[] = [];
 		if (stdout) parts.push(stdout.trimEnd());
 		if (stderr) parts.push(stderr.trimEnd());
@@ -42,10 +43,12 @@ export const pollProcessTool: AgentTool<typeof pollSchema> = {
 					type: "text",
 					text:
 						(output || "(no new output)") +
-						(exited ? `\n\nProcess exited with code ${exitCode}.` : "\n\nProcess still running."),
+						(exited
+							? `\n\nProcess exited with ${exitSignal ? `signal ${exitSignal}` : `code ${exitCode}`}.`
+							: "\n\nProcess still running."),
 				},
 			],
-			details: { status, sessionId, exitCode: exited ? exitCode : undefined, aggregated },
+			details: { status, sessionId, exitCode: exited ? exitCode : undefined, exitSignal, aggregated },
 			status,
 		};
 	},
