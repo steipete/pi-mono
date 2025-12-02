@@ -26,7 +26,7 @@ import type { SessionManager } from "../session-manager.js";
 import type { SettingsManager } from "../settings-manager.js";
 import { expandSlashCommand, type FileSlashCommand, loadSlashCommands, parseCommandArgs } from "../slash-commands.js";
 import { getEditorTheme, getMarkdownTheme, onThemeChange, setTheme, theme } from "../theme/theme.js";
-import { getProcessLogTool, killProcessTool, listProcessesTool } from "../tools/index.js";
+import { processTool } from "../tools/index.js";
 import { AssistantMessageComponent } from "./assistant-message.js";
 import { CustomEditor } from "./custom-editor.js";
 import { DynamicBorder } from "./dynamic-border.js";
@@ -1031,7 +1031,7 @@ export class TuiRenderer {
 	private async handleJobsCommand(options: { silent?: boolean } = {}): Promise<void> {
 		const { silent } = options;
 		try {
-			const result = await listProcessesTool.execute("tui/list_processes", { limit: 50 });
+			const result = await processTool.execute("tui/list_processes", { action: "list" } as any);
 			const sessions: any[] = (result.details as any).sessions ?? [];
 			const items =
 				sessions.map((s) => ({
@@ -1077,7 +1077,7 @@ export class TuiRenderer {
 			return;
 		}
 		try {
-			const result = await killProcessTool.execute("tui/kill_process", { sessionId });
+			const result = await processTool.execute("tui/kill_process", { action: "kill", sessionId } as any);
 			const message = extractTextContent(result.content) || `Kill sent to ${sessionId}`;
 			this.chatContainer.addChild(new Spacer(1));
 			this.chatContainer.addChild(new Text(theme.fg("warning", message)));
@@ -1089,11 +1089,12 @@ export class TuiRenderer {
 
 	private async showTailForSession(sessionId: string, limit?: number): Promise<void> {
 		try {
-			const result = await getProcessLogTool.execute("tui/get_process_log", {
+			const result = await processTool.execute("tui/get_process_log", {
+				action: "log",
 				sessionId,
 				offset: 0,
 				limit: limit ?? 4000,
-			});
+			} as any);
 			const text = extractTextContent(result.content) || "(no output)";
 			this.chatContainer.addChild(new Spacer(1));
 			this.chatContainer.addChild(new Text(theme.fg("muted", `Log for ${sessionId.slice(0, 8)}`), 1, 0));
