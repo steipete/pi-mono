@@ -222,17 +222,12 @@ ${chalk.bold("Environment Variables:")}
 
 ${chalk.bold("Available Tools:")}
   read            - Read file contents
-  bash            - Execute bash commands
-  bash_stream     - Execute bash with streaming output and background continuation
+  bash            - Execute bash with streaming output and background continuation
   edit            - Edit files with find/replace
   write           - Write files (creates/overwrites)
   grep            - Search file contents (read-only, off by default)
   find            - Find files by glob pattern (read-only, off by default)
   ls              - List directory contents (read-only, off by default)
-  poll_process    - Fetch output/completion status for a bash_stream session
-  write_stdin     - Send input to a running bash_stream session
-  kill_process    - Force-terminate a running bash_stream session
-  list_processes  - List running/recent bash_stream sessions
-  get_process_log - Fetch buffered output for a session (paged)
+  process         - Manage bash sessions: list, poll, log, write, kill
 `);
 }

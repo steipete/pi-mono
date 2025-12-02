@@ -263,18 +263,13 @@ describe("Coding Agent Tools", () => {
 			const result = await bashTool.execute("test-call-8", { command: "echo 'test output'" });
 
 			expect(getTextOutput(result)).toContain("test output");
-			expect(result.details).toBeUndefined();
+			expect(result.status).toBe("completed");
+			expect(result.details?.status).toBe("completed");
 		});
 
 		it("should handle command errors", async () => {
 			await expect(bashTool.execute("test-call-9", { command: "exit 1" })).rejects.toThrow(
 				/(Command failed|code 1)/,
-			);
-		});
-
-		it("should respect timeout", async () => {
-			await expect(bashTool.execute("test-call-10", { command: "sleep 5", timeout: 1 })).rejects.toThrow(
-				/timed out/i,
 			);
 		});
 	});

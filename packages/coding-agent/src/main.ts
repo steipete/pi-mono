@@ -55,27 +55,18 @@ function configureOAuthStorage(): void {
 	});
 }
 const STREAMING_ONLY_TOOLS: ToolName[] = [
-	"bash_stream",
-	"poll_process",
-	"write_stdin",
-	"kill_process",
-	"list_processes",
-	"get_process_log",
+	"process",
 ];
-const NON_STREAMING_ONLY_TOOLS: ToolName[] = ["bash"];
+const NON_STREAMING_ONLY_TOOLS: ToolName[] = [];
 const DEFAULT_STREAMING_TOOL_NAMES: ToolName[] = [
 	"read",
-	"bash_stream",
+	"bash",
 	"edit",
 	"write",
 	"grep",
 	"find",
 	"ls",
-	"poll_process",
-	"write_stdin",
-	"kill_process",
-	"list_processes",
-	"get_process_log",
+	"process",
 ];
 const DEFAULT_NON_STREAMING_TOOL_NAMES: ToolName[] = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 /** Check npm registry for new version (non-blocking) */
