@@ -786,12 +786,12 @@ export class InteractiveMode {
 					this.loadingAnimation.stop();
 				}
 				this.statusContainer.clear();
-				this.loadingAnimation = new Loader(
-					this.ui,
-					(spinner) => theme.fg("accent", spinner),
-					(text) => theme.fg("muted", text),
-					"Working... (esc to interrupt)",
-				);
+					this.loadingAnimation = new Loader(
+						this.ui,
+						(spinner) => theme.fg("accent", spinner),
+						(text) => theme.fg("muted", text),
+						"Working... (esc to interrupt, ctrl+b to background)",
+					);
 				this.statusContainer.addChild(this.loadingAnimation);
 				this.ui.requestRender();
 				break;
