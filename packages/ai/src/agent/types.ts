@@ -23,6 +23,7 @@ export interface AgentToolResult<T> {
 export interface ToolExecuteOptions {
 	signal?: AbortSignal;
 	emitEvent?: (event: AgentEvent) => void;
+	yieldSignal?: AbortSignal;
 }
 
 // Callback for streaming tool execution updates
@@ -82,6 +83,12 @@ export type AgentEvent =
 			toolCallId: string;
 			stream: "stdout" | "stderr";
 			chunk: string;
+	  }
+	// Emitted to hand the UI a soft-yield handle for an in-flight tool
+	| {
+			type: "tool_execution_handle";
+			toolCallId: string;
+			requestYield: () => void;
 	  }
 	// Emitted when a tool yields control but keeps running in the background
 	| {

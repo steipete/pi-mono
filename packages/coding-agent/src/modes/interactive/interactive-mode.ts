@@ -83,6 +83,9 @@ export class InteractiveMode {
 
 	// Tool execution tracking: toolCallId -> component
 	private pendingTools = new Map<string, ToolExecutionComponent>();
+	// Soft-yield handles: toolCallId -> requestYield
+	private toolYieldHandles = new Map<string, () => void>();
+	private lastYieldToolCallId: string | null = null;
 
 	// Track if this is the first user message (to skip spacer)
 	private isFirstUserMessage = true;
@@ -226,14 +229,17 @@ export class InteractiveMode {
 			theme.fg("dim", "ctrl+p") +
 			theme.fg("muted", " to cycle models") +
 			"\n" +
-			theme.fg("dim", "ctrl+o") +
-			theme.fg("muted", " to expand tools") +
-			"\n" +
-			theme.fg("dim", "ctrl+t") +
-			theme.fg("muted", " to toggle thinking") +
-			"\n" +
-			theme.fg("dim", "/") +
-			theme.fg("muted", " for commands") +
+				theme.fg("dim", "ctrl+o") +
+				theme.fg("muted", " to expand tools") +
+				"\n" +
+				theme.fg("dim", "ctrl+b") +
+				theme.fg("muted", " to background tool") +
+				"\n" +
+				theme.fg("dim", "ctrl+t") +
+				theme.fg("muted", " to toggle thinking") +
+				"\n" +
+				theme.fg("dim", "/") +
+				theme.fg("muted", " for commands") +
 			"\n" +
 			theme.fg("dim", "!") +
 			theme.fg("muted", " to run bash") +
@@ -583,6 +589,7 @@ export class InteractiveMode {
 		this.editor.onShiftTab = () => this.cycleThinkingLevel();
 		this.editor.onCtrlP = () => this.cycleModel();
 		this.editor.onCtrlO = () => this.toggleToolOutputExpansion();
+		this.editor.onCtrlB = () => this.handleCtrlB();
 		this.editor.onCtrlT = () => this.toggleThinkingBlockVisibility();
 
 		this.editor.onChange = (text: string) => {
@@ -840,72 +847,87 @@ export class InteractiveMode {
 					const assistantMsg = event.message as AssistantMessage;
 					this.streamingComponent.updateContent(assistantMsg);
 
-					if (assistantMsg.stopReason === "aborted" || assistantMsg.stopReason === "error") {
-						const errorMessage =
-							assistantMsg.stopReason === "aborted" ? "Operation aborted" : assistantMsg.errorMessage || "Error";
-						for (const [, component] of this.pendingTools.entries()) {
-							component.updateResult({
-								content: [{ type: "text", text: errorMessage }],
-								isError: true,
-							});
+						if (assistantMsg.stopReason === "aborted" || assistantMsg.stopReason === "error") {
+							const errorMessage =
+								assistantMsg.stopReason === "aborted" ? "Operation aborted" : assistantMsg.errorMessage || "Error";
+							for (const [, component] of this.pendingTools.entries()) {
+								component.updateResult({
+									content: [{ type: "text", text: errorMessage }],
+									isError: true,
+								});
+							}
+							this.pendingTools.clear();
+							this.toolYieldHandles.clear();
+							this.lastYieldToolCallId = null;
 						}
-						this.pendingTools.clear();
-					}
 					this.streamingComponent = null;
 					this.footer.invalidate();
 				}
 				this.ui.requestRender();
 				break;
 
-			case "tool_execution_start": {
-				if (!this.pendingTools.has(event.toolCallId)) {
-					const component = new ToolExecutionComponent(
-						event.toolName,
-						event.args,
-						{
-							showImages: this.settingsManager.getShowImages(),
-						},
-						this.customTools.get(event.toolName)?.tool,
-					);
-					this.chatContainer.addChild(component);
-					this.pendingTools.set(event.toolCallId, component);
-					this.ui.requestRender();
+				case "tool_execution_start": {
+					if (!this.pendingTools.has(event.toolCallId)) {
+						const component = new ToolExecutionComponent(
+							event.toolName,
+							event.args,
+							{
+								showImages: this.settingsManager.getShowImages(),
+							},
+							this.customTools.get(event.toolName)?.tool,
+						);
+						this.chatContainer.addChild(component);
+						this.pendingTools.set(event.toolCallId, component);
+						this.lastYieldToolCallId = event.toolCallId;
+						this.ui.requestRender();
+					}
+					break;
 				}
-				break;
-			}
 
-			case "tool_execution_update": {
-				const component = this.pendingTools.get(event.toolCallId);
-				if (component) {
-					component.updateResult({ ...event.partialResult, isError: false }, true);
-					this.ui.requestRender();
+				case "tool_execution_handle": {
+					this.toolYieldHandles.set(event.toolCallId, event.requestYield);
+					this.lastYieldToolCallId = event.toolCallId;
+					break;
 				}
-				break;
-			}
 
-			case "tool_execution_end": {
-				const component = this.pendingTools.get(event.toolCallId);
-				if (component) {
-					component.updateResult({ ...event.result, isError: event.isError });
-					this.pendingTools.delete(event.toolCallId);
-					this.ui.requestRender();
+				case "tool_execution_update": {
+					const component = this.pendingTools.get(event.toolCallId);
+					if (component) {
+						component.updateResult({ ...event.partialResult, isError: false }, true);
+						this.ui.requestRender();
+					}
+					break;
 				}
-				break;
-			}
 
-			case "agent_end":
-				if (this.loadingAnimation) {
-					this.loadingAnimation.stop();
-					this.loadingAnimation = null;
-					this.statusContainer.clear();
+				case "tool_execution_end": {
+					const component = this.pendingTools.get(event.toolCallId);
+					if (component) {
+						component.updateResult({ ...event.result, isError: event.isError });
+						this.pendingTools.delete(event.toolCallId);
+						this.toolYieldHandles.delete(event.toolCallId);
+						if (this.lastYieldToolCallId === event.toolCallId) {
+							this.lastYieldToolCallId = null;
+						}
+						this.ui.requestRender();
+					}
+					break;
 				}
-				if (this.streamingComponent) {
-					this.chatContainer.removeChild(this.streamingComponent);
-					this.streamingComponent = null;
-				}
-				this.pendingTools.clear();
-				this.ui.requestRender();
-				break;
+
+				case "agent_end":
+					if (this.loadingAnimation) {
+						this.loadingAnimation.stop();
+						this.loadingAnimation = null;
+						this.statusContainer.clear();
+					}
+					if (this.streamingComponent) {
+						this.chatContainer.removeChild(this.streamingComponent);
+						this.streamingComponent = null;
+					}
+					this.pendingTools.clear();
+					this.toolYieldHandles.clear();
+					this.lastYieldToolCallId = null;
+					this.ui.requestRender();
+					break;
 
 			case "auto_compaction_start": {
 				// Disable submit to preserve editor text during compaction
@@ -1177,6 +1199,26 @@ export class InteractiveMode {
 		process.exit(0);
 	}
 
+	private handleCtrlB(): void {
+		const preferredId =
+			this.lastYieldToolCallId && this.toolYieldHandles.has(this.lastYieldToolCallId) ? this.lastYieldToolCallId : null;
+		const fallbackId = this.toolYieldHandles.keys().next().value as string | undefined;
+		const toolCallId = preferredId || fallbackId;
+
+		if (!toolCallId) {
+			this.showStatus("No running tool to background");
+			return;
+		}
+
+		const requestYield = this.toolYieldHandles.get(toolCallId);
+		if (!requestYield) {
+			this.showStatus("No running tool to background");
+			return;
+		}
+
+		this.showStatus("Requesting tool yield (backgrounding)…");
+		requestYield();
+	}
 	private updateEditorBorderColor(): void {
 		if (this.isBashMode) {
 			this.editor.borderColor = theme.getBashModeBorderColor();

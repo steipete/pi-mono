@@ -11,6 +11,7 @@ export class CustomEditor extends Editor {
 	public onCtrlP?: () => void;
 	public onCtrlO?: () => void;
 	public onCtrlT?: () => void;
+	public onCtrlB?: () => void;
 
 	handleInput(data: string): void {
 		// Intercept Ctrl+T for thinking block visibility toggle
@@ -22,6 +23,12 @@ export class CustomEditor extends Editor {
 		// Intercept Ctrl+O for tool output expansion
 		if (isCtrlO(data) && this.onCtrlO) {
 			this.onCtrlO();
+			return;
+		}
+
+		// Intercept Ctrl+B for backgrounding current tool
+		if (data === "\x02" && this.onCtrlB) {
+			this.onCtrlB();
 			return;
 		}
 
