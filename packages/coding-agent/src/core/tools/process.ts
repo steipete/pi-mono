@@ -137,9 +137,6 @@ export const processTool: AgentTool<typeof processSchema> = {
 
 			case "log": {
 				if (session) {
-					// Clear pending buffers so subsequent polls don't repeat them, but do NOT re-append
-					// to aggregated (that already happened when the chunks were streamed).
-					drainSession(session);
 					const total = session.aggregated.length;
 					const slice = session.aggregated.slice(offset ?? 0, limit ? (offset ?? 0) + limit : undefined);
 					return {
