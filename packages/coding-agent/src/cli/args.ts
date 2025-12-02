@@ -29,6 +29,7 @@ export interface Args {
 	customTools?: string[];
 	print?: boolean;
 	export?: string;
+	streamingTools?: boolean;
 	noSkills?: boolean;
 	skills?: string[];
 	listModels?: string | true;
@@ -108,6 +109,10 @@ export function parseArgs(args: string[]): Args {
 			result.print = true;
 		} else if (arg === "--export" && i + 1 < args.length) {
 			result.export = args[++i];
+		} else if (arg === "--streaming-tools") {
+			result.streamingTools = true;
+		} else if (arg === "--no-streaming-tools") {
+			result.streamingTools = false;
 		} else if (arg === "--hook" && i + 1 < args.length) {
 			result.hooks = result.hooks ?? [];
 			result.hooks.push(args[++i]);
@@ -155,8 +160,10 @@ ${chalk.bold("Options:")}
   --session <path>               Use specific session file
   --no-session                   Don't save session (ephemeral)
   --models <patterns>            Comma-separated model patterns for quick cycling with Ctrl+P
-  --tools <tools>                Comma-separated list of tools to enable (default: read,bash,edit,write)
-                                 Available: read, bash, edit, write, grep, find, ls
+  --tools <tools>                Comma-separated list of tools to enable (default: read,bash,edit,write,grep,find,ls; plus process when enabled)
+                                 Available: read, bash, edit, write, grep, find, ls, process
+  --streaming-tools              Enable the process tool for background job management
+  --no-streaming-tools           Disable the process tool
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
   --hook <path>                  Load a hook file (can be used multiple times)
   --tool <path>                  Load a custom tool file (can be used multiple times)
@@ -215,15 +222,17 @@ ${chalk.bold("Environment Variables:")}
   XAI_API_KEY             - xAI Grok API key
   OPENROUTER_API_KEY      - OpenRouter API key
   ZAI_API_KEY             - ZAI API key
-  ${ENV_AGENT_DIR.padEnd(23)} - Session storage directory (default: ~/${CONFIG_DIR_NAME}/agent)
+  PI_STREAMING_TOOLS      - Streaming tools toggle (0/1/true/false; overrides settings.json)
+	  ${ENV_AGENT_DIR.padEnd(23)} - Session storage directory (default: ~/${CONFIG_DIR_NAME}/agent)
 
-${chalk.bold("Available Tools (default: read, bash, edit, write):")}
-  read   - Read file contents
-  bash   - Execute bash commands
-  edit   - Edit files with find/replace
-  write  - Write files (creates/overwrites)
-  grep   - Search file contents (read-only, off by default)
-  find   - Find files by glob pattern (read-only, off by default)
-  ls     - List directory contents (read-only, off by default)
+${chalk.bold("Available Tools:")}
+  read            - Read file contents
+  bash            - Execute bash with streaming output and background continuation
+  edit            - Edit files with find/replace
+  write           - Write files (creates/overwrites)
+  grep            - Search file contents (read-only, off by default)
+  find            - Find files by glob pattern (read-only, off by default)
+  ls              - List directory contents (read-only, off by default)
+  process         - Manage bash sessions: list, poll, log, write, kill
 `);
 }

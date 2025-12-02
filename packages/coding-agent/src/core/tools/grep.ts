@@ -77,15 +77,6 @@ export function createGrepTool(cwd: string): AgentTool<typeof grepSchema> {
 						fn();
 					}
 				};
-				}
-
-				let settled = false;
-				const settle = (fn: () => void) => {
-					if (!settled) {
-						settled = true;
-						fn();
-					}
-				};
 
 				(async () => {
 					try {

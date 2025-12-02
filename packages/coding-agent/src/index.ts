@@ -155,8 +155,6 @@ export {
 } from "./core/skills.js";
 // Tools
 export {
-	type BashToolDetails,
-	bashStreamTool,
 	bashTool,
 	codingTools,
 	editTool,
@@ -164,14 +162,12 @@ export {
 	findTool,
 	type GrepToolDetails,
 	grepTool,
-	killProcessTool,
 	type LsToolDetails,
 	lsTool,
-	pollProcessTool,
+	processTool,
 	type ReadToolDetails,
 	readTool,
 	type TruncationResult,
-	writeStdinTool,
 	writeTool,
 } from "./core/tools/index.js";
 // Main entry point

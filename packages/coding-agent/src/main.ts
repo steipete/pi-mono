@@ -24,12 +24,16 @@ import { type CreateAgentSessionOptions, configureOAuthStorage, createAgentSessi
 import { SessionManager } from "./core/session-manager.js";
 import { SettingsManager } from "./core/settings-manager.js";
 import { printTimings, time } from "./core/timings.js";
-import { allTools } from "./core/tools/index.js";
+import { allTools, type ToolName } from "./core/tools/index.js";
 import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.js";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.js";
 import { getChangelogPath, getNewEntries, parseChangelog } from "./utils/changelog.js";
 import { ensureTool } from "./utils/tools-manager.js";
 
+const STREAMING_ONLY_TOOLS: ToolName[] = ["process"];
+const NON_STREAMING_ONLY_TOOLS: ToolName[] = [];
+const DEFAULT_STREAMING_TOOL_NAMES: ToolName[] = ["read", "bash", "edit", "write", "grep", "find", "ls", "process"];
+const DEFAULT_NON_STREAMING_TOOL_NAMES: ToolName[] = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 async function checkForNewVersion(currentVersion: string): Promise<string | null> {
 	try {
 		const response = await fetch("https://registry.npmjs.org/@mariozechner/pi-coding-agent/latest");
@@ -326,7 +330,29 @@ export async function main(args: string[]) {
 		sessionManager = SessionManager.open(selectedPath);
 	}
 
+	// Determine streaming tool mode (CLI flag > env/settings > default true)
+	const streamingToolsEnabled =
+		parsed.streamingTools !== undefined ? parsed.streamingTools : settingsManager.getStreamingTools();
+
+	// Determine which tools to use
+	const defaultToolNames = streamingToolsEnabled ? DEFAULT_STREAMING_TOOL_NAMES : DEFAULT_NON_STREAMING_TOOL_NAMES;
+	const requestedToolNames = parsed.tools ?? defaultToolNames;
+	const filteredToolNames = requestedToolNames.filter((name) => {
+		if (!streamingToolsEnabled && STREAMING_ONLY_TOOLS.includes(name)) {
+			console.error(chalk.yellow(`Skipping tool "${name}" because streaming tools are disabled.`));
+			return false;
+		}
+		if (streamingToolsEnabled && NON_STREAMING_ONLY_TOOLS.includes(name)) {
+			console.error(chalk.yellow(`Skipping tool "${name}" because non-streaming bash is disabled.`));
+			return false;
+		}
+		return true;
+	});
+	const selectedToolNames = filteredToolNames.length > 0 ? filteredToolNames : defaultToolNames;
+	const selectedTools = selectedToolNames.map((name) => allTools[name]);
+
 	const sessionOptions = buildSessionOptions(parsed, scopedModels, sessionManager);
+	sessionOptions.tools = selectedTools;
 	time("buildSessionOptions");
 	const { session, customToolsResult, modelFallbackMessage } = await createAgentSession(sessionOptions);
 	time("createAgentSession");

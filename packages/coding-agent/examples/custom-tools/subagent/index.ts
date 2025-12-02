@@ -16,8 +16,8 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Type } from "@sinclair/typebox";
-import type { AgentToolResult, Message } from "@mariozechner/pi-ai";
+import { Type, type Static } from "@sinclair/typebox";
+import type { AgentToolResult, Message, ToolExecuteOptions } from "@mariozechner/pi-ai";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { getMarkdownTheme, type CustomAgentTool, type CustomToolFactory, type ToolAPI } from "@mariozechner/pi-coding-agent";
@@ -382,7 +382,19 @@ const factory: CustomToolFactory = (pi) => {
 		},
 		parameters: SubagentParams,
 
-		async execute(_toolCallId, params, signal, onUpdate) {
+		async execute(toolCallId, params: Static<typeof SubagentParams>, options?: ToolExecuteOptions) {
+			const signal = options?.signal;
+			const onUpdate: OnUpdateCallback | undefined = options?.emitEvent
+				? (partial) => {
+						options.emitEvent?.({
+							type: "tool_execution_update",
+							toolCallId,
+							toolName: "subagent",
+							args: params,
+							partialResult: partial,
+						});
+					}
+				: undefined;
 			const agentScope: AgentScope = params.agentScope ?? "user";
 			const discovery = discoverAgents(pi.cwd, agentScope);
 			const agents = discovery.agents;

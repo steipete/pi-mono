@@ -45,6 +45,7 @@ export interface Settings {
 	hooks?: string[]; // Array of hook file paths
 	hookTimeout?: number; // Timeout for hook execution in ms (default: 30000)
 	customTools?: string[]; // Array of custom tool file paths
+	streamingTools?: boolean;
 	skills?: SkillsSettings;
 	terminal?: TerminalSettings;
 }
@@ -223,6 +224,19 @@ export class SettingsManager {
 
 	setDefaultThinkingLevel(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"): void {
 		this.globalSettings.defaultThinkingLevel = level;
+		this.save();
+	}
+
+	getStreamingTools(): boolean {
+		if (process.env.PI_STREAMING_TOOLS === "0") return false;
+		if (process.env.PI_STREAMING_TOOLS === "1") return true;
+		if (process.env.PI_STREAMING_TOOLS?.toLowerCase() === "false") return false;
+		if (process.env.PI_STREAMING_TOOLS?.toLowerCase() === "true") return true;
+		return this.settings.streamingTools ?? true;
+	}
+
+	setStreamingTools(enabled: boolean): void {
+		this.settings.streamingTools = enabled;
 		this.save();
 	}
 

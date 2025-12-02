@@ -40,7 +40,7 @@ import {
 } from "../../core/session-manager.js";
 import { loadSkills } from "../../core/skills.js";
 import { loadProjectContextFiles } from "../../core/system-prompt.js";
-import { getProcessLogTool, killProcessTool, listProcessesTool } from "../../core/tools/index.js";
+import { processTool } from "../../core/tools/index.js";
 import type { TruncationResult } from "../../core/tools/truncate.js";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
@@ -53,7 +53,7 @@ import { DynamicBorder } from "./components/dynamic-border.js";
 import { FooterComponent } from "./components/footer.js";
 import { HookInputComponent } from "./components/hook-input.js";
 import { HookSelectorComponent } from "./components/hook-selector.js";
-import { JobsSelectorComponent, type JobItem } from "./components/jobs-selector.js";
+import { type JobItem, JobsSelectorComponent } from "./components/jobs-selector.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
 import { OAuthSelectorComponent } from "./components/oauth-selector.js";
 import { QueueModeSelectorComponent } from "./components/queue-mode-selector.js";
@@ -238,17 +238,17 @@ export class InteractiveMode {
 			theme.fg("dim", "ctrl+p") +
 			theme.fg("muted", " to cycle models") +
 			"\n" +
-				theme.fg("dim", "ctrl+o") +
-				theme.fg("muted", " to expand tools") +
-				"\n" +
-				theme.fg("dim", "ctrl+b") +
-				theme.fg("muted", " to background tool") +
-				"\n" +
-				theme.fg("dim", "ctrl+t") +
-				theme.fg("muted", " to toggle thinking") +
-				"\n" +
-				theme.fg("dim", "/") +
-				theme.fg("muted", " for commands") +
+			theme.fg("dim", "ctrl+o") +
+			theme.fg("muted", " to expand tools") +
+			"\n" +
+			theme.fg("dim", "ctrl+b") +
+			theme.fg("muted", " to background tool") +
+			"\n" +
+			theme.fg("dim", "ctrl+t") +
+			theme.fg("muted", " to toggle thinking") +
+			"\n" +
+			theme.fg("dim", "/") +
+			theme.fg("muted", " for commands") +
 			"\n" +
 			theme.fg("dim", "!") +
 			theme.fg("muted", " to run bash") +
@@ -740,10 +740,10 @@ export class InteractiveMode {
 				return;
 			}
 
-				// Handle bash command
-				if (text.startsWith("!")) {
-					const command = text.slice(1).trim();
-					if (command) {
+			// Handle bash command
+			if (text.startsWith("!")) {
+				const command = text.slice(1).trim();
+				if (command) {
 					if (this.session.isBashRunning) {
 						this.showWarning("A bash command is already running. Press Esc to cancel it first.");
 						this.editor.setText(text);
@@ -1253,7 +1253,9 @@ export class InteractiveMode {
 	}
 	private handleCtrlB(): void {
 		const preferredId =
-			this.lastYieldToolCallId && this.toolYieldHandles.has(this.lastYieldToolCallId) ? this.lastYieldToolCallId : null;
+			this.lastYieldToolCallId && this.toolYieldHandles.has(this.lastYieldToolCallId)
+				? this.lastYieldToolCallId
+				: null;
 		const fallbackId = this.toolYieldHandles.keys().next().value as string | undefined;
 		const toolCallId = preferredId || fallbackId;
 
@@ -2054,12 +2056,12 @@ export class InteractiveMode {
 			return;
 		}
 
-		const result = await killProcessTool.execute("ui", { sessionId }, {});
+		const result = await processTool.execute("ui", { action: "kill", sessionId }, {});
 		this.showStatus(this.extractText(result.content) || `Killed session ${sessionId}.`);
 	}
 
 	private async showJobTail(sessionId: string, limit = 4000): Promise<void> {
-		const result = await getProcessLogTool.execute("ui", { sessionId, limit }, {});
+		const result = await processTool.execute("ui", { action: "log", sessionId, offset: 0, limit }, {});
 		const output = this.extractText(result.content) || "(no output)";
 
 		this.chatContainer.addChild(new Spacer(1));
@@ -2071,7 +2073,7 @@ export class InteractiveMode {
 	}
 
 	private async killJobAndRefresh(sessionId: string, selector: JobsSelectorComponent): Promise<void> {
-		const result = await killProcessTool.execute("ui", { sessionId }, {});
+		const result = await processTool.execute("ui", { action: "kill", sessionId }, {});
 		this.showStatus(this.extractText(result.content) || `Killed session ${sessionId}.`);
 
 		const jobs = await this.loadJobItems();
@@ -2081,11 +2083,11 @@ export class InteractiveMode {
 	}
 
 	private async loadJobItems(limit = 20): Promise<JobItem[]> {
-		const result = await listProcessesTool.execute("ui", { limit }, {});
+		const result = await processTool.execute("ui", { action: "list" }, {});
 		const sessions = this.extractSessions(result.details);
 		if (sessions.length === 0) return [];
 
-		return sessions.map((s) => {
+		return sessions.slice(0, limit).map((s) => {
 			const status = s.status.padEnd(9, " ");
 			const runtime = this.formatDurationMs(s.runtimeMs);
 			const cmd = this.truncateMiddle(s.command, 80);

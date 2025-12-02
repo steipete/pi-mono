@@ -1,217 +1,274 @@
-import { randomBytes } from "node:crypto";
-import { createWriteStream } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { AgentEvent, AgentTool } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import { spawn } from "child_process";
-import { getShellConfig, killProcessTree } from "../../utils/shell.js";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateTail } from "./truncate.js";
+import { type ChildProcessWithoutNullStreams, spawn } from "child_process";
+import { randomUUID } from "crypto";
+import { addSession, appendOutput, markExited } from "./process-registry.js";
+import { getShellConfig, killProcessTree } from "./shell-utils.js";
 
-/**
- * Generate a unique temp file path for bash output
- */
-function getTempFilePath(): string {
-	const id = randomBytes(8).toString("hex");
-	return join(tmpdir(), `pi-bash-${id}.log`);
-}
+const CHUNK_LIMIT = 8 * 1024;
+const DEFAULT_YIELD_MS = clampNumber(readEnvInt("PI_BASH_YIELD_MS"), 60_000, 1_000, 120_000);
+const DEFAULT_MAX_OUTPUT = clampNumber(readEnvInt("PI_BASH_MAX_OUTPUT_CHARS"), 30_000, 1_000, 150_000);
 
 const bashSchema = Type.Object({
 	command: Type.String({ description: "Bash command to execute" }),
-	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
+	workdir: Type.Optional(Type.String({ description: "Working directory (defaults to cwd)" })),
+	env: Type.Optional(Type.Record(Type.String(), Type.String())),
+	yieldMs: Type.Optional(Type.Number({ description: "Milliseconds to block before yielding (default 60000)" })),
+	stdinMode: Type.Optional(Type.Union([Type.Literal("pipe"), Type.Literal("pty")])),
 });
 
-export interface BashToolDetails {
-	truncation?: TruncationResult;
-	fullOutputPath?: string;
-}
+export type BashToolDetails =
+	| {
+			status: "running";
+			sessionId: string;
+			pid?: number;
+			startedAt: number;
+			tail?: string;
+	  }
+	| {
+			status: "completed" | "failed";
+			exitCode: number | null;
+			durationMs: number;
+			aggregated: string;
+	  };
 
-export function createBashTool(cwd: string): AgentTool<typeof bashSchema> {
-	return {
-		name: "bash",
-		label: "bash",
-		description: `Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
-		parameters: bashSchema,
-		execute: async (
-			toolCallId: string,
-			{ command, timeout }: { command: string; timeout?: number },
-			{ signal, emitEvent }: { signal?: AbortSignal; emitEvent?: (event: AgentEvent) => void } = {},
-		) => {
-			return new Promise((resolve, reject) => {
-				const { shell, args } = getShellConfig();
-				const child = spawn(shell, [...args, command], {
-					cwd,
-					detached: true,
-					stdio: ["ignore", "pipe", "pipe"],
-				});
+export const bashTool: AgentTool<typeof bashSchema, BashToolDetails> = {
+	name: "bash",
+	label: "bash",
+	description: "Execute bash with live streaming and background continuation.",
+	parameters: bashSchema,
+	execute: async (
+		toolCallId: string,
+		{
+			command,
+			workdir,
+			env,
+			yieldMs,
+			stdinMode,
+		}: {
+			command: string;
+			workdir?: string;
+			env?: Record<string, string>;
+			yieldMs?: number;
+			stdinMode?: "pipe" | "pty";
+		},
+		{
+			signal,
+			emitEvent,
+			yieldSignal,
+		}: { signal?: AbortSignal; emitEvent?: (event: AgentEvent) => void; yieldSignal?: AbortSignal } = {},
+	) => {
+		if (!command) {
+			throw new Error("Provide a command to start.");
+		}
+		if (stdinMode && stdinMode !== "pipe") {
+			throw new Error('Only stdinMode "pipe" is supported right now.');
+		}
 
-				// We'll stream to a temp file if output gets large
-				let tempFilePath: string | undefined;
-				let tempFileStream: ReturnType<typeof createWriteStream> | undefined;
-				let totalBytes = 0;
+		const yieldWindow = clampNumber(yieldMs, DEFAULT_YIELD_MS, 1_000, 120_000);
+		const maxOutput = DEFAULT_MAX_OUTPUT;
+		const startedAt = Date.now();
+		const sessionId = randomUUID();
 
-				// Keep a rolling buffer of the last chunk for tail truncation
-				const chunks: Buffer[] = [];
-				let chunksBytes = 0;
-				// Keep more than we need so we have enough for truncation
-				const maxChunksBytes = DEFAULT_MAX_BYTES * 2;
+		const { shell, args } = getShellConfig();
+		const child: ChildProcessWithoutNullStreams = spawn(shell, [...args, command], {
+			cwd: workdir || process.cwd(),
+			env: { ...process.env, ...env },
+			detached: true,
+			stdio: ["pipe", "pipe", "pipe"],
+		});
 
-				let timedOut = false;
+		const session = {
+			id: sessionId,
+			command,
+			child,
+			startedAt,
+			cwd: workdir,
+			maxOutputChars: maxOutput,
+			totalOutputChars: 0,
+			pendingStdout: [],
+			pendingStderr: [],
+			aggregated: "",
+			tail: "",
+			exited: false,
+			exitCode: undefined as number | null | undefined,
+			exitSignal: undefined as NodeJS.Signals | number | null | undefined,
+			truncated: false,
+		};
+		addSession(session);
 
-				// Set timeout if provided
-				let timeoutHandle: NodeJS.Timeout | undefined;
-				if (timeout !== undefined && timeout > 0) {
-					timeoutHandle = setTimeout(() => {
-						timedOut = true;
-						onAbort();
-					}, timeout * 1000);
-				}
+		let settled = false;
+		let yielded = false;
+		let yieldTimer: NodeJS.Timeout | null = null;
 
-				const handleData = (data: Buffer) => {
-					totalBytes += data.length;
+		const settle = (fn: () => void) => {
+			if (settled) return;
+			settled = true;
+			fn();
+		};
 
-					// Start writing to temp file once we exceed the threshold
-					if (totalBytes > DEFAULT_MAX_BYTES && !tempFilePath) {
-						tempFilePath = getTempFilePath();
-						tempFileStream = createWriteStream(tempFilePath);
-						// Write all buffered chunks to the file
-						for (const chunk of chunks) {
-							tempFileStream.write(chunk);
-						}
-					}
+		const onAbort = () => {
+			if (child.pid) {
+				killProcessTree(child.pid);
+			}
+		};
 
-					// Write to temp file if we have one
-					if (tempFileStream) {
-						tempFileStream.write(data);
-					}
+		if (signal?.aborted) onAbort();
+		else if (signal) signal.addEventListener("abort", onAbort, { once: true });
 
-					// Keep rolling buffer of recent data
-					chunks.push(data);
-					chunksBytes += data.length;
+		child.stdout.on("data", (data) => {
+			const str = data.toString();
+			for (const chunk of chunkString(str)) {
+				appendOutput(session, "stdout", chunk);
+				emitChunk(emitEvent, toolCallId, "stdout", chunk);
+			}
+		});
 
-					// Trim old chunks if buffer is too large
-					while (chunksBytes > maxChunksBytes && chunks.length > 1) {
-						const removed = chunks.shift()!;
-						chunksBytes -= removed.length;
-					}
+		child.stderr.on("data", (data) => {
+			const str = data.toString();
+			for (const chunk of chunkString(str)) {
+				appendOutput(session, "stderr", chunk);
+				emitChunk(emitEvent, toolCallId, "stderr", chunk);
+			}
+		});
 
-					// Stream partial output to callback (truncated rolling buffer)
-					if (emitEvent) {
-						const fullBuffer = Buffer.concat(chunks);
-						const fullText = fullBuffer.toString("utf-8");
-						const truncation = truncateTail(fullText);
-						emitEvent({
-							type: "tool_execution_update",
-							toolCallId,
-							toolName: "bash",
-							args: { command, timeout },
-							partialResult: {
-								content: [{ type: "text", text: truncation.content || "" }],
-								details: {
-									truncation: truncation.truncated ? truncation : undefined,
-									fullOutputPath: tempFilePath,
-								},
+		return new Promise((resolve, reject) => {
+			const resolveRunning = () => {
+				settle(() =>
+					resolve({
+						content: [
+							{
+								type: "text",
+								text:
+									`Command still running (session ${sessionId}, pid ${child.pid ?? "n/a"}). ` +
+									"Use process (poll/write/kill/log/list) for follow-up.",
 							},
-						});
-					}
-				};
+						],
+						details: {
+							status: "running",
+							sessionId,
+							pid: child.pid ?? undefined,
+							startedAt,
+							tail: session.tail,
+						},
+						status: "running",
+					}),
+				);
+			};
 
-				// Collect stdout and stderr together
-				if (child.stdout) {
-					child.stdout.on("data", handleData);
-				}
-				if (child.stderr) {
-					child.stderr.on("data", handleData);
-				}
-
-				// Handle process exit
-				child.on("close", (code) => {
-					if (timeoutHandle) {
-						clearTimeout(timeoutHandle);
-					}
-					if (signal) {
-						signal.removeEventListener("abort", onAbort);
-					}
-
-					// Close temp file stream
-					if (tempFileStream) {
-						tempFileStream.end();
-					}
-
-					// Combine all buffered chunks
-					const fullBuffer = Buffer.concat(chunks);
-					const fullOutput = fullBuffer.toString("utf-8");
-
-					if (signal?.aborted) {
-						let output = fullOutput;
-						if (output) output += "\n\n";
-						output += "Command aborted";
-						reject(new Error(output));
-						return;
-					}
-
-					if (timedOut) {
-						let output = fullOutput;
-						if (output) output += "\n\n";
-						output += `Command timed out after ${timeout} seconds`;
-						reject(new Error(output));
-						return;
-					}
-
-					// Apply tail truncation
-					const truncation = truncateTail(fullOutput);
-					let outputText = truncation.content || "(no output)";
-
-					// Build details with truncation info
-					let details: BashToolDetails | undefined;
-
-					if (truncation.truncated) {
-						details = {
-							truncation,
-							fullOutputPath: tempFilePath,
-						};
-
-						// Build actionable notice
-						const startLine = truncation.totalLines - truncation.outputLines + 1;
-						const endLine = truncation.totalLines;
-
-						if (truncation.lastLinePartial) {
-							// Edge case: last line alone > 30KB
-							const lastLineSize = formatSize(Buffer.byteLength(fullOutput.split("\n").pop() || "", "utf-8"));
-							outputText += `\n\n[Showing last ${formatSize(truncation.outputBytes)} of line ${endLine} (line is ${lastLineSize}). Full output: ${tempFilePath}]`;
-						} else if (truncation.truncatedBy === "lines") {
-							outputText += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${tempFilePath}]`;
-						} else {
-							outputText += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${tempFilePath}]`;
-						}
-					}
-
-					if (code !== 0 && code !== null) {
-						outputText += `\n\nCommand exited with code ${code}`;
-						reject(new Error(outputText));
-					} else {
-						resolve({ content: [{ type: "text", text: outputText }], details });
-					}
+			const onYieldNow = () => {
+				if (yieldTimer) clearTimeout(yieldTimer);
+				if (settled) return;
+				yielded = true;
+				emitEvent?.({
+					type: "tool_execution_progress",
+					toolCallId,
+					sessionId,
+					pid: child.pid ?? undefined,
+					startedAt,
+					tail: session.tail,
 				});
+				resolveRunning();
+			};
 
-				// Handle abort signal - kill entire process tree
-				const onAbort = () => {
-					if (child.pid) {
-						killProcessTree(child.pid);
-					}
-				};
+			if (yieldSignal?.aborted) onYieldNow();
+			else if (yieldSignal) yieldSignal.addEventListener("abort", onYieldNow, { once: true });
 
-				if (signal) {
-					if (signal.aborted) {
-						onAbort();
-					} else {
-						signal.addEventListener("abort", onAbort, { once: true });
-					}
+			yieldTimer = setTimeout(() => {
+				if (settled) return;
+				yielded = true;
+				emitEvent?.({
+					type: "tool_execution_progress",
+					toolCallId,
+					sessionId,
+					pid: child.pid ?? undefined,
+					startedAt,
+					tail: session.tail,
+				});
+				resolveRunning();
+			}, yieldWindow);
+
+			child.once("exit", (code, exitSignal) => {
+				if (yieldTimer) clearTimeout(yieldTimer);
+				const durationMs = Date.now() - startedAt;
+				const wasSignal = exitSignal != null;
+				const isSuccess = code === 0 && !wasSignal && !signal?.aborted;
+				const status: "completed" | "failed" = isSuccess ? "completed" : "failed";
+				markExited(session, code, exitSignal, status);
+
+				if (yielded) return; // polled later
+
+				const aggregated = session.aggregated.trim();
+				if (!isSuccess) {
+					const reason =
+						wasSignal && exitSignal
+							? `Command aborted by signal ${exitSignal}`
+							: code === null
+								? "Command aborted before exit code was captured"
+								: `Command exited with code ${code}`;
+					const message = aggregated ? `${aggregated}\n\n${reason}` : reason;
+					settle(() => reject(new Error(message)));
+					return;
 				}
+
+				settle(() =>
+					resolve({
+						content: [{ type: "text", text: aggregated || "(no output)" }],
+						details: { status: "completed", exitCode: code ?? 0, durationMs, aggregated },
+						status: "completed",
+					}),
+				);
 			});
+
+			child.once("error", (err) => {
+				if (yieldTimer) clearTimeout(yieldTimer);
+				settle(() => reject(err));
+			});
+		});
+	},
+};
+
+export function createBashTool(cwd: string): AgentTool<typeof bashSchema, BashToolDetails> {
+	return {
+		...bashTool,
+		execute: (toolCallId, params, options) => {
+			const workdir = params.workdir ?? cwd;
+			return bashTool.execute(toolCallId, { ...params, workdir }, options);
 		},
 	};
 }
 
-/** Default bash tool using process.cwd() - for backwards compatibility */
-export const bashTool = createBashTool(process.cwd());
+function clampNumber(value: number | undefined, defaultValue: number, min: number, max: number) {
+	if (value === undefined || Number.isNaN(value)) return defaultValue;
+	return Math.min(Math.max(value, min), max);
+}
+
+function readEnvInt(key: string) {
+	const raw = process.env[key];
+	if (!raw) return undefined;
+	const parsed = Number.parseInt(raw, 10);
+	return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function chunkString(input: string, limit = CHUNK_LIMIT) {
+	const chunks: string[] = [];
+	for (let i = 0; i < input.length; i += limit) {
+		chunks.push(input.slice(i, i + limit));
+	}
+	return chunks;
+}
+
+function emitChunk(
+	emitEvent: ((event: AgentEvent) => void) | undefined,
+	toolCallId: string,
+	stream: "stdout" | "stderr",
+	chunk: string,
+) {
+	if (!emitEvent) return;
+	emitEvent({
+		type: "tool_execution_output",
+		toolCallId,
+		stream,
+		chunk,
+	});
+}
