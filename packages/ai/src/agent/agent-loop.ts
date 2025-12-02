@@ -269,27 +269,22 @@ async function executeToolCalls<T>(
 		let result: AgentToolResult<T>;
 		let isError = false;
 
-		try {
-			if (!tool) throw new Error(`Tool ${toolCall.name} not found`);
+			try {
+				if (!tool) throw new Error(`Tool ${toolCall.name} not found`);
 
-			// Validate arguments using shared validation function
-			const validatedArgs = validateToolArguments(tool, toolCall);
+				// Validate arguments using shared validation function
+				const validatedArgs = validateToolArguments(tool, toolCall);
 
-			// Execute with validated, typed arguments, passing update callback
-			result = await tool.execute(toolCall.id, validatedArgs, signal, (partialResult) => {
-				stream.push({
-					type: "tool_execution_update",
-					toolCallId: toolCall.id,
-					toolName: toolCall.name,
-					args: toolCall.arguments,
-					partialResult,
+				// Execute with validated, typed arguments
+				result = await tool.execute(toolCall.id, validatedArgs, {
+					signal,
+					emitEvent: (event) => stream.push(event),
 				});
-			});
-		} catch (e) {
-			result = {
-				content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
-				details: {} as T,
-			};
+			} catch (e) {
+				result = {
+					content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
+					details: {} as T,
+				};
 			isError = true;
 		}
 

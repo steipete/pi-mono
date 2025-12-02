@@ -25,7 +25,7 @@ export function createReadTool(cwd: string): AgentTool<typeof readSchema> {
 		execute: async (
 			_toolCallId: string,
 			{ path, offset, limit }: { path: string; offset?: number; limit?: number },
-			signal?: AbortSignal,
+			{ signal }: { signal?: AbortSignal } = {},
 		) => {
 			const absolutePath = resolveReadPath(path, cwd);
 

@@ -19,7 +19,7 @@ export function createWriteTool(cwd: string): AgentTool<typeof writeSchema> {
 		execute: async (
 			_toolCallId: string,
 			{ path, content }: { path: string; content: string },
-			signal?: AbortSignal,
+			{ signal }: { signal?: AbortSignal } = {},
 		) => {
 			const absolutePath = resolveToCwd(path, cwd);
 			const dir = dirname(absolutePath);

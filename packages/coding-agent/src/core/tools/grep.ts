@@ -62,12 +62,21 @@ export function createGrepTool(cwd: string): AgentTool<typeof grepSchema> {
 				context?: number;
 				limit?: number;
 			},
-			signal?: AbortSignal,
+			{ signal }: { signal?: AbortSignal } = {},
 		) => {
 			return new Promise((resolve, reject) => {
 				if (signal?.aborted) {
 					reject(new Error("Operation aborted"));
 					return;
+				}
+
+				let settled = false;
+				const settle = (fn: () => void) => {
+					if (!settled) {
+						settled = true;
+						fn();
+					}
+				};
 				}
 
 				let settled = false;

@@ -18,7 +18,7 @@ export function createWriteTool(executor: Executor): AgentTool<typeof writeSchem
 		execute: async (
 			_toolCallId: string,
 			{ path, content }: { label: string; path: string; content: string },
-			signal?: AbortSignal,
+			{ signal }: { signal?: AbortSignal } = {},
 		) => {
 			// Create parent directories and write file using heredoc
 			const dir = path.includes("/") ? path.substring(0, path.lastIndexOf("/")) : ".";

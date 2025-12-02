@@ -26,7 +26,7 @@ export function createLsTool(cwd: string): AgentTool<typeof lsSchema> {
 		execute: async (
 			_toolCallId: string,
 			{ path, limit }: { path?: string; limit?: number },
-			signal?: AbortSignal,
+			{ signal }: { signal?: AbortSignal } = {},
 		) => {
 			return new Promise((resolve, reject) => {
 				if (signal?.aborted) {

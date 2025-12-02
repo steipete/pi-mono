@@ -116,7 +116,7 @@ export function createEditTool(cwd: string): AgentTool<typeof editSchema> {
 		execute: async (
 			_toolCallId: string,
 			{ path, oldText, newText }: { path: string; oldText: string; newText: string },
-			signal?: AbortSignal,
+			{ signal }: { signal?: AbortSignal } = {},
 		) => {
 			const absolutePath = resolveToCwd(path, cwd);
 

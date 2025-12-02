@@ -141,7 +141,11 @@ export function createJavaScriptReplTool(): AgentTool<typeof javascriptReplSchem
 			return JAVASCRIPT_REPL_TOOL_DESCRIPTION(runtimeProviderDescriptions);
 		},
 		parameters: javascriptReplSchema,
-		execute: async function (_toolCallId: string, args: Static<typeof javascriptReplSchema>, signal?: AbortSignal) {
+		execute: async function (
+			_toolCallId: string,
+			args: Static<typeof javascriptReplSchema>,
+			{ signal }: { signal?: AbortSignal } = {},
+		) {
 			const result = await executeJavaScript(
 				args.code,
 				this.runtimeProvidersFactory?.() ?? [],

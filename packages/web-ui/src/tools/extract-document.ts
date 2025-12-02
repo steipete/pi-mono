@@ -41,7 +41,7 @@ export function createExtractDocumentTool(): AgentTool<typeof extractDocumentSch
 		corsProxyUrl: undefined as string | undefined, // Can be set by consumer (e.g., from user settings)
 		description: EXTRACT_DOCUMENT_DESCRIPTION,
 		parameters: extractDocumentSchema,
-		execute: async (_toolCallId: string, args: ExtractDocumentParams, signal?: AbortSignal) => {
+		execute: async (_toolCallId: string, args: ExtractDocumentParams, { signal }: { signal?: AbortSignal } = {}) => {
 			if (signal?.aborted) {
 				throw new Error("Extract document aborted");
 			}
