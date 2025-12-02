@@ -216,27 +216,29 @@ export const bashStreamTool: AgentTool<typeof bashStreamSchema, BashStreamDetail
 
 				const aggregated = session.aggregated.trim();
 				const durationMs = Date.now() - startedAt;
-				if (code && code !== 0) {
-					settle(() =>
-						reject(
-							new Error(
-								aggregated
-									? `${aggregated}\n\nCommand exited with code ${code}`
-									: `Command exited with code ${code}`,
-							),
-						),
-					);
+				const wasSignal = exitSignal != null;
+				const isSuccess = code === 0 && !wasSignal;
+				if (!isSuccess) {
+					const reason =
+						wasSignal && exitSignal
+							? `Command aborted by signal ${exitSignal}`
+							: code === null
+								? "Command aborted before exit code was captured"
+								: `Command exited with code ${code}`;
+					const message = aggregated ? `${aggregated}\n\n${reason}` : reason;
+					settle(() => reject(new Error(message)));
 					deleteSession(sessionId);
-				} else {
-					settle(() =>
-						resolve({
-							content: [{ type: "text", text: aggregated || "(no output)" }],
-							details: { status: "completed", exitCode: code ?? 0, durationMs, aggregated },
-							status: "completed",
-						}),
-					);
-					deleteSession(sessionId);
+					return;
 				}
+
+				settle(() =>
+					resolve({
+						content: [{ type: "text", text: aggregated || "(no output)" }],
+						details: { status: "completed", exitCode: code ?? 0, durationMs, aggregated },
+						status: "completed",
+					}),
+				);
+				deleteSession(sessionId);
 			});
 
 			child.once("error", (err) => {

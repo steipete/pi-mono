@@ -56,4 +56,20 @@ describe("streamable bash tools", () => {
 		expect(polled.status).toBe("completed");
 		expect(polled.details?.aggregated).toContain("hi");
 	});
+
+	it("surfaces aborts as failures", async () => {
+		const ac = new AbortController();
+		const promise = bashStreamTool.execute(
+			"call-abort-1",
+			{
+				command: "sleep 5",
+				yieldMs: 1000,
+			},
+			{ signal: ac.signal, emitEvent: () => {} },
+		);
+
+		ac.abort();
+
+		await expect(promise).rejects.toThrow(/aborted|signal/i);
+	});
 });
