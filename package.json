@@ -20,7 +20,8 @@
 		"prepublishOnly": "npm run clean && npm run build && npm run check",
 		"publish": "npm run prepublishOnly && npm publish -ws --access public",
 		"publish:dry": "npm run prepublishOnly && npm publish -ws --access public --dry-run",
-		"prepare": "husky"
+		"prepare": "husky",
+		"install:tau": "npm run build -w @mariozechner/pi-coding-agent && npm --prefix packages/coding-agent link"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.3.5",

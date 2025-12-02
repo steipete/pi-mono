@@ -211,12 +211,17 @@ Feel free to use these tools when needed to provide accurate and helpful respons
 		onApiKeyRequired: async (provider: string) => {
 			return await ApiKeyPromptDialog.prompt(provider);
 		},
-		toolsFactory: (agent, agentInterface, artifactsPanel, runtimeProvidersFactory) => {
+		toolsFactory: (
+			agentInstance: Agent,
+			agentInterface: any,
+			artifactsPanel: any,
+			runtimeProvidersFactory: any,
+		) => {
 			// Create javascript_repl tool with access to attachments + artifacts
 			const replTool = createJavaScriptReplTool();
 			replTool.runtimeProvidersFactory = runtimeProvidersFactory;
 			return [replTool];
-		}
+		},
 	});
 };
 
@@ -268,17 +273,17 @@ const renderApp = () => {
 						size: "sm",
 						children: icon(History, "sm"),
 						onClick: () => {
-							SessionListDialog.open(
-								async (sessionId) => {
-									await loadSession(sessionId);
-								},
-								(deletedSessionId) => {
-									// Only reload if the current session was deleted
-									if (deletedSessionId === currentSessionId) {
-										newSession();
-									}
-								},
-							);
+						SessionListDialog.open(
+							async (sessionId: string) => {
+								await loadSession(sessionId);
+							},
+							(deletedSessionId: string) => {
+								// Only reload if the current session was deleted
+								if (deletedSessionId === currentSessionId) {
+									newSession();
+								}
+							},
+						);
 						},
 						title: "Sessions",
 					})}
