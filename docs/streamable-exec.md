@@ -57,3 +57,8 @@ Let the pi agent run long shell commands without stalling the reasoning loop by:
 - Extend event types in the agent event stream.
 - Wire TUI/CLI to render streaming output and progress states.
 - Add tests: streaming, yield/poll, stdin, kill, caps, abort signal.
+
+## Background visibility (in-memory, no disk)
+- Tools: `list_processes` (running + recent, TTL bounded) and `get_process_log` (paged buffered output) alongside `kill_process`/`poll_process`.
+- Registry keeps finished sessions for 30 min by default (`PI_BASH_JOB_TTL_MS`, clamped).
+- CLI/TUI affordances: `/jobs` opens a jobs selector (Enter tails a session), `/tail <sessionId> [limit]` dumps buffered output, `/kill <sessionId>` terminates.

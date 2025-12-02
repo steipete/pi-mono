@@ -13,11 +13,17 @@ import type { ToolName } from "./tools/index.js";
 const toolDescriptions: Record<ToolName, string> = {
 	read: "Read file contents",
 	bash: "Execute bash commands (ls, grep, find, etc.)",
+	bash_stream: "Execute bash with streaming output and background continuation",
 	edit: "Make surgical edits to files (find exact text and replace)",
 	write: "Create or overwrite files",
 	grep: "Search file contents for patterns (respects .gitignore)",
 	find: "Find files by glob pattern (respects .gitignore)",
 	ls: "List directory contents",
+	poll_process: "Fetch output or completion status for a running bash_stream session",
+	write_stdin: "Send input to a running bash_stream session",
+	kill_process: "Force-terminate a running bash_stream session",
+	list_processes: "List running and recently finished bash_stream sessions",
+	get_process_log: "Fetch buffered output for a session (paged)",
 };
 
 /** Resolve input as file path or literal string */

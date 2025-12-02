@@ -3,8 +3,10 @@ export { bashStreamTool } from "./bash-stream.js";
 export { editTool } from "./edit.js";
 export { type FindToolDetails, findTool } from "./find.js";
 export { type GrepToolDetails, grepTool } from "./grep.js";
+export { getProcessLogTool } from "./get-process-log.js";
 export { killProcessTool } from "./kill-process.js";
 export { type LsToolDetails, lsTool } from "./ls.js";
+export { listProcessesTool } from "./list-processes.js";
 export { pollProcessTool } from "./poll-process.js";
 export { type ReadToolDetails, readTool } from "./read.js";
 export type { TruncationResult } from "./truncate.js";
@@ -15,8 +17,10 @@ import { bashTool } from "./bash.js";
 import { bashStreamTool } from "./bash-stream.js";
 import { editTool } from "./edit.js";
 import { findTool } from "./find.js";
+import { getProcessLogTool } from "./get-process-log.js";
 import { grepTool } from "./grep.js";
 import { killProcessTool } from "./kill-process.js";
+import { listProcessesTool } from "./list-processes.js";
 import { lsTool } from "./ls.js";
 import { pollProcessTool } from "./poll-process.js";
 import { readTool } from "./read.js";
@@ -39,6 +43,8 @@ export const allTools = {
 	poll_process: pollProcessTool,
 	write_stdin: writeStdinTool,
 	kill_process: killProcessTool,
+	list_processes: listProcessesTool,
+	get_process_log: getProcessLogTool,
 };
 
 export type ToolName = keyof typeof allTools;

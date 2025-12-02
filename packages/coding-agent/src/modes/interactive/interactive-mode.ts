@@ -34,6 +34,7 @@ import { listOAuthProviders, login, logout, type OAuthProvider } from "../../cor
 import { getLatestCompactionEntry, SUMMARY_PREFIX, SUMMARY_SUFFIX } from "../../core/session-manager.js";
 import { loadSkills } from "../../core/skills.js";
 import { loadProjectContextFiles } from "../../core/system-prompt.js";
+import { getProcessLogTool, killProcessTool, listProcessesTool } from "../../core/tools/index.js";
 import type { TruncationResult } from "../../core/tools/truncate.js";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
@@ -46,6 +47,7 @@ import { DynamicBorder } from "./components/dynamic-border.js";
 import { FooterComponent } from "./components/footer.js";
 import { HookInputComponent } from "./components/hook-input.js";
 import { HookSelectorComponent } from "./components/hook-selector.js";
+import { JobsSelectorComponent, type JobItem } from "./components/jobs-selector.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
 import { OAuthSelectorComponent } from "./components/oauth-selector.js";
 import { QueueModeSelectorComponent } from "./components/queue-mode-selector.js";
@@ -160,6 +162,9 @@ export class InteractiveMode {
 			{ name: "session", description: "Show session info and stats" },
 			{ name: "changelog", description: "Show changelog entries" },
 			{ name: "hotkeys", description: "Show all keyboard shortcuts" },
+			{ name: "jobs", description: "List running/recent background jobs" },
+			{ name: "tail", description: "Show buffered output for a job (/tail <sessionId> [limit])" },
+			{ name: "kill", description: "Kill a running job (/kill <sessionId>)" },
 			{ name: "branch", description: "Create a new branch from a previous message" },
 			{ name: "login", description: "Login with OAuth provider" },
 			{ name: "logout", description: "Logout from OAuth provider" },
@@ -696,11 +701,26 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/jobs") {
+				this.editor.setText("");
+				await this.handleJobsCommand();
+				return;
+			}
+			if (text.startsWith("/tail")) {
+				this.editor.setText("");
+				await this.handleTailCommand(text);
+				return;
+			}
+			if (text.startsWith("/kill")) {
+				this.editor.setText("");
+				await this.handleKillCommand(text);
+				return;
+			}
 
-			// Handle bash command
-			if (text.startsWith("!")) {
-				const command = text.slice(1).trim();
-				if (command) {
+				// Handle bash command
+				if (text.startsWith("!")) {
+					const command = text.slice(1).trim();
+					if (command) {
 					if (this.session.isBashRunning) {
 						this.showWarning("A bash command is already running. Press Esc to cancel it first.");
 						this.editor.setText(text);
@@ -1836,6 +1856,176 @@ export class InteractiveMode {
 		this.session.setAutoCompactionEnabled(newState);
 		this.footer.setAutoCompactEnabled(newState);
 		this.showStatus(`Auto-compaction: ${newState ? "on" : "off"}`);
+	}
+
+	private async handleJobsCommand(): Promise<void> {
+		const jobs = await this.loadJobItems();
+		if (jobs.length === 0) {
+			this.showStatus("No running or recent jobs.");
+			return;
+		}
+
+		this.showSelector((done) => {
+			const selector = new JobsSelectorComponent(
+				jobs,
+				(sessionId) => {
+					done();
+					void this.showJobTail(sessionId);
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+				(sessionId) => {
+					void this.killJobAndRefresh(sessionId, selector);
+				},
+			);
+			return { component: selector, focus: selector };
+		});
+	}
+
+	private async handleTailCommand(text: string): Promise<void> {
+		const parts = text.split(/\s+/).filter(Boolean);
+		const sessionId = parts[1];
+		const limitRaw = parts[2];
+
+		if (!sessionId) {
+			this.showWarning("Usage: /tail <sessionId> [limit]");
+			return;
+		}
+
+		const limit = limitRaw ? Number.parseInt(limitRaw, 10) : 4000;
+		if (limitRaw && (!Number.isFinite(limit) || limit <= 0)) {
+			this.showWarning("Usage: /tail <sessionId> [limit] (limit must be a positive number)");
+			return;
+		}
+
+		await this.showJobTail(sessionId, limit);
+	}
+
+	private async handleKillCommand(text: string): Promise<void> {
+		const parts = text.split(/\s+/).filter(Boolean);
+		const sessionId = parts[1];
+
+		if (!sessionId) {
+			this.showWarning("Usage: /kill <sessionId>");
+			return;
+		}
+
+		const result = await killProcessTool.execute("ui", { sessionId }, {});
+		this.showStatus(this.extractText(result.content) || `Killed session ${sessionId}.`);
+	}
+
+	private async showJobTail(sessionId: string, limit = 4000): Promise<void> {
+		const result = await getProcessLogTool.execute("ui", { sessionId, limit }, {});
+		const output = this.extractText(result.content) || "(no output)";
+
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new DynamicBorder());
+		this.chatContainer.addChild(new Text(theme.bold(theme.fg("toolTitle", `Tail: ${sessionId}`)), 1, 0));
+		this.chatContainer.addChild(new Text(theme.fg("toolOutput", output), 1, 0));
+		this.chatContainer.addChild(new DynamicBorder());
+		this.ui.requestRender();
+	}
+
+	private async killJobAndRefresh(sessionId: string, selector: JobsSelectorComponent): Promise<void> {
+		const result = await killProcessTool.execute("ui", { sessionId }, {});
+		this.showStatus(this.extractText(result.content) || `Killed session ${sessionId}.`);
+
+		const jobs = await this.loadJobItems();
+		selector.updateItems(jobs);
+		this.ui.setFocus(selector);
+		this.ui.requestRender();
+	}
+
+	private async loadJobItems(limit = 20): Promise<JobItem[]> {
+		const result = await listProcessesTool.execute("ui", { limit }, {});
+		const sessions = this.extractSessions(result.details);
+		if (sessions.length === 0) return [];
+
+		return sessions.map((s) => {
+			const status = s.status.padEnd(9, " ");
+			const runtime = this.formatDurationMs(s.runtimeMs);
+			const cmd = this.truncateMiddle(s.command, 80);
+			const truncatedFlag = s.truncated ? " [truncated]" : "";
+			return {
+				sessionId: s.sessionId,
+				label: `${s.sessionId.slice(0, 8)} ${status} ${runtime} :: ${cmd}${truncatedFlag}`,
+				description: s.cwd,
+			};
+		});
+	}
+
+	private extractText(content: Array<{ type: string; text?: string }> | undefined): string {
+		if (!content) return "";
+		return content
+			.filter((c) => c.type === "text")
+			.map((c) => c.text ?? "")
+			.join("\n")
+			.trim();
+	}
+
+	private extractSessions(details: unknown): Array<{
+		sessionId: string;
+		status: string;
+		runtimeMs: number;
+		cwd?: string;
+		command: string;
+		truncated: boolean;
+	}> {
+		if (!details || typeof details !== "object") return [];
+		const sessions = (details as { sessions?: unknown }).sessions;
+		if (!Array.isArray(sessions)) return [];
+
+		const out: Array<{
+			sessionId: string;
+			status: string;
+			runtimeMs: number;
+			cwd?: string;
+			command: string;
+			truncated: boolean;
+		}> = [];
+
+		for (const item of sessions) {
+			if (!item || typeof item !== "object") continue;
+			const sessionId = (item as { sessionId?: unknown }).sessionId;
+			const status = (item as { status?: unknown }).status;
+			const runtimeMs = (item as { runtimeMs?: unknown }).runtimeMs;
+			const cwd = (item as { cwd?: unknown }).cwd;
+			const command = (item as { command?: unknown }).command;
+			const truncated = (item as { truncated?: unknown }).truncated;
+
+			if (typeof sessionId !== "string") continue;
+			if (typeof status !== "string") continue;
+			if (typeof runtimeMs !== "number" || !Number.isFinite(runtimeMs)) continue;
+			if (typeof command !== "string") continue;
+
+			out.push({
+				sessionId,
+				status,
+				runtimeMs,
+				cwd: typeof cwd === "string" ? cwd : undefined,
+				command,
+				truncated: typeof truncated === "boolean" ? truncated : false,
+			});
+		}
+
+		return out;
+	}
+
+	private truncateMiddle(input: string, max: number): string {
+		if (input.length <= max) return input;
+		const half = Math.floor((max - 3) / 2);
+		return `${input.slice(0, half)}...${input.slice(input.length - half)}`;
+	}
+
+	private formatDurationMs(ms: number): string {
+		if (ms < 1000) return `${ms}ms`;
+		const seconds = Math.floor(ms / 1000);
+		if (seconds < 60) return `${seconds}s`;
+		const minutes = Math.floor(seconds / 60);
+		const rem = seconds % 60;
+		return `${minutes}m${rem.toString().padStart(2, "0")}s`;
 	}
 
 	private showShowImagesSelector(): void {

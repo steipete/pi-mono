@@ -2,7 +2,7 @@ import type { AgentEvent, AgentTool } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { type ChildProcessWithoutNullStreams, spawn } from "child_process";
 import { randomUUID } from "crypto";
-import { addSession, appendOutput, deleteSession, markExited } from "./process-registry.js";
+import { addSession, appendOutput, markExited } from "./process-registry.js";
 import { getShellConfig, killProcessTree } from "./shell-utils.js";
 
 const CHUNK_LIMIT = 8 * 1024;
@@ -111,10 +111,12 @@ export const bashStreamTool: AgentTool<typeof bashStreamSchema, BashStreamDetail
 
 		const session = {
 			id: sessionId,
+			command,
 			child,
 			startedAt,
 			cwd: workdir,
 			maxOutputChars: maxOutput,
+			totalOutputChars: 0,
 			pendingStdout: [],
 			pendingStderr: [],
 			aggregated: "",
@@ -122,6 +124,7 @@ export const bashStreamTool: AgentTool<typeof bashStreamSchema, BashStreamDetail
 			exited: false,
 			exitCode: undefined as number | null | undefined,
 			exitSignal: undefined as NodeJS.Signals | number | null | undefined,
+			truncated: false,
 		};
 		addSession(session);
 
@@ -206,7 +209,11 @@ export const bashStreamTool: AgentTool<typeof bashStreamSchema, BashStreamDetail
 
 			child.once("exit", (code, exitSignal) => {
 				clearTimeout(yieldTimer);
-				markExited(session, code, exitSignal);
+				const durationMs = Date.now() - startedAt;
+				const wasSignal = exitSignal != null;
+				const isSuccess = code === 0 && !wasSignal;
+				const status: "completed" | "failed" = isSuccess && !signal?.aborted ? "completed" : "failed";
+				markExited(session, code, exitSignal, status);
 				cleanup();
 
 				if (yielded) {
@@ -215,9 +222,6 @@ export const bashStreamTool: AgentTool<typeof bashStreamSchema, BashStreamDetail
 				}
 
 				const aggregated = session.aggregated.trim();
-				const durationMs = Date.now() - startedAt;
-				const wasSignal = exitSignal != null;
-				const isSuccess = code === 0 && !wasSignal;
 				if (!isSuccess) {
 					const reason =
 						wasSignal && exitSignal
@@ -227,7 +231,6 @@ export const bashStreamTool: AgentTool<typeof bashStreamSchema, BashStreamDetail
 								: `Command exited with code ${code}`;
 					const message = aggregated ? `${aggregated}\n\n${reason}` : reason;
 					settle(() => reject(new Error(message)));
-					deleteSession(sessionId);
 					return;
 				}
 
@@ -238,14 +241,12 @@ export const bashStreamTool: AgentTool<typeof bashStreamSchema, BashStreamDetail
 						status: "completed",
 					}),
 				);
-				deleteSession(sessionId);
 			});
 
 			child.once("error", (err) => {
 				clearTimeout(yieldTimer);
 				cleanup();
 				settle(() => reject(err));
-				deleteSession(sessionId);
 			});
 		});
 	},

@@ -1,6 +1,6 @@
 import type { AgentTool } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import { deleteSession, getSession, markExited } from "./process-registry.js";
+import { getSession, markExited } from "./process-registry.js";
 import { killProcessTree } from "./shell-utils.js";
 
 const killSchema = Type.Object({
@@ -25,8 +25,7 @@ export const killProcessTool: AgentTool<typeof killSchema> = {
 		if (session.child.pid) {
 			killProcessTree(session.child.pid);
 		}
-		markExited(session, null, "SIGKILL");
-		deleteSession(sessionId);
+		markExited(session, null, "SIGKILL", "killed");
 
 		return {
 			content: [{ type: "text", text: `Killed session ${sessionId}.` }],
