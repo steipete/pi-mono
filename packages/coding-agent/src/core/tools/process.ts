@@ -109,6 +109,13 @@ export const processTool: AgentTool<typeof processSchema> = {
 						status: "failed",
 					};
 				}
+				if (!session.backgrounded) {
+					return {
+						content: [{ type: "text", text: `Session ${sessionId} is not backgrounded.` }],
+						details: { status: "failed" },
+						status: "failed",
+					};
+				}
 				const { stdout, stderr } = drainSession(session);
 				const exited = session.exited;
 				const exitCode = session.exitCode ?? 0;
@@ -137,6 +144,13 @@ export const processTool: AgentTool<typeof processSchema> = {
 
 			case "log": {
 				if (session) {
+					if (!session.backgrounded) {
+						return {
+							content: [{ type: "text", text: `Session ${sessionId} is not backgrounded.` }],
+							details: { status: "failed" },
+							status: "failed",
+						};
+					}
 					const total = session.aggregated.length;
 					const slice = session.aggregated.slice(offset ?? 0, limit ? (offset ?? 0) + limit : undefined);
 					return {
@@ -182,6 +196,13 @@ export const processTool: AgentTool<typeof processSchema> = {
 						status: "failed",
 					};
 				}
+				if (!session.backgrounded) {
+					return {
+						content: [{ type: "text", text: `Session ${sessionId} is not backgrounded.` }],
+						details: { status: "failed" },
+						status: "failed",
+					};
+				}
 				if (!session.child.stdin || session.child.stdin.destroyed) {
 					return {
 						content: [{ type: "text", text: `Session ${sessionId} stdin is not writable.` }],
@@ -214,6 +235,13 @@ export const processTool: AgentTool<typeof processSchema> = {
 				if (!session) {
 					return {
 						content: [{ type: "text", text: `No active session found for ${sessionId}` }],
+						details: { status: "failed" },
+						status: "failed",
+					};
+				}
+				if (!session.backgrounded) {
+					return {
+						content: [{ type: "text", text: `Session ${sessionId} is not backgrounded.` }],
 						details: { status: "failed" },
 						status: "failed",
 					};
