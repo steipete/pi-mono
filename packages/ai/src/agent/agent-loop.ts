@@ -205,7 +205,10 @@ async function executeToolCalls<T>(
 			const validatedArgs = validateToolArguments(tool, toolCall);
 
 			// Execute with validated, typed arguments
-			resultOrError = await tool.execute(toolCall.id, validatedArgs, signal);
+			resultOrError = await tool.execute(toolCall.id, validatedArgs, {
+				signal,
+				emitEvent: (event) => stream.push(event),
+			});
 		} catch (e) {
 			resultOrError = e instanceof Error ? e.message : String(e);
 			isError = true;

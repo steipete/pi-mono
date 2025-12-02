@@ -283,7 +283,11 @@ export class ArtifactsPanel extends LitElement {
 			},
 			parameters: artifactsParamsSchema,
 			// Execute mutates our local store and returns a plain output
-			execute: async (_toolCallId: string, args: Static<typeof artifactsParamsSchema>, _signal?: AbortSignal) => {
+			execute: async (
+				_toolCallId: string,
+				args: Static<typeof artifactsParamsSchema>,
+				{ signal: _signal }: { signal?: AbortSignal } = {},
+			) => {
 				const output = await this.executeCommand(args);
 				return { content: [{ type: "text", text: output }], details: undefined };
 			},

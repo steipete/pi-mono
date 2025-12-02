@@ -129,7 +129,7 @@ export const editTool: AgentTool<typeof editSchema> = {
 	execute: async (
 		_toolCallId: string,
 		{ path, oldText, newText }: { path: string; oldText: string; newText: string },
-		signal?: AbortSignal,
+		{ signal }: { signal?: AbortSignal } = {},
 	) => {
 		const absolutePath = resolvePath(expandPath(path));
 

@@ -42,7 +42,7 @@ export function createReadTool(executor: Executor): AgentTool<typeof readSchema>
 		execute: async (
 			_toolCallId: string,
 			{ path, offset, limit }: { label: string; path: string; offset?: number; limit?: number },
-			signal?: AbortSignal,
+			{ signal }: { signal?: AbortSignal } = {},
 		) => {
 			const mimeType = isImageFile(path);
 

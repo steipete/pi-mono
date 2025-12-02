@@ -238,7 +238,7 @@ ${chalk.bold("Options:")}
   --no-session            Don't save session (ephemeral)
   --models <patterns>     Comma-separated model patterns for quick cycling with Ctrl+P
   --tools <tools>         Comma-separated list of tools to enable (default: read,bash,edit,write)
-                          Available: read, bash, edit, write, grep, find, ls
+                          Available: read, bash, bash_stream, edit, write, grep, find, ls, poll_process, write_stdin, kill_process
   --thinking <level>      Set thinking level: off, minimal, low, medium, high
   --export <file>         Export session file to HTML and exit
   --help, -h              Show this help
@@ -308,11 +308,15 @@ ${chalk.bold("Available Tools (default: read, bash, edit, write):")}
 const toolDescriptions: Record<ToolName, string> = {
 	read: "Read file contents",
 	bash: "Execute bash commands (ls, grep, find, etc.)",
+	bash_stream: "Execute bash with streaming output and background continuation",
 	edit: "Make surgical edits to files (find exact text and replace)",
 	write: "Create or overwrite files",
 	grep: "Search file contents for patterns (respects .gitignore)",
 	find: "Find files by glob pattern (respects .gitignore)",
 	ls: "List directory contents",
+	poll_process: "Fetch output or completion status for a running bash_stream session",
+	write_stdin: "Send input to a running bash_stream session",
+	kill_process: "Force-terminate a running bash_stream session",
 };
 
 function buildSystemPrompt(customPrompt?: string, selectedTools?: ToolName[]): string {

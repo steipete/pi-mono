@@ -1,65 +1,7 @@
 import type { AgentTool } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { spawn } from "child_process";
-import { existsSync } from "fs";
-
-/**
- * Get shell configuration based on platform
- */
-function getShellConfig(): { shell: string; args: string[] } {
-	if (process.platform === "win32") {
-		const paths: string[] = [];
-		const programFiles = process.env.ProgramFiles;
-		if (programFiles) {
-			paths.push(`${programFiles}\\Git\\bin\\bash.exe`);
-		}
-		const programFilesX86 = process.env["ProgramFiles(x86)"];
-		if (programFilesX86) {
-			paths.push(`${programFilesX86}\\Git\\bin\\bash.exe`);
-		}
-
-		for (const path of paths) {
-			if (existsSync(path)) {
-				return { shell: path, args: ["-c"] };
-			}
-		}
-
-		throw new Error(
-			`Git Bash not found. Please install Git for Windows from https://git-scm.com/download/win\n` +
-				`Searched in:\n${paths.map((p) => `  ${p}`).join("\n")}`,
-		);
-	}
-	return { shell: "sh", args: ["-c"] };
-}
-
-/**
- * Kill a process and all its children
- */
-function killProcessTree(pid: number): void {
-	if (process.platform === "win32") {
-		// Use taskkill on Windows to kill process tree
-		try {
-			spawn("taskkill", ["/F", "/T", "/PID", String(pid)], {
-				stdio: "ignore",
-				detached: true,
-			});
-		} catch (e) {
-			// Ignore errors if taskkill fails
-		}
-	} else {
-		// Use SIGKILL on Unix/Linux/Mac
-		try {
-			process.kill(-pid, "SIGKILL");
-		} catch (e) {
-			// Fallback to killing just the child if process group kill fails
-			try {
-				process.kill(pid, "SIGKILL");
-			} catch (e2) {
-				// Process already dead
-			}
-		}
-	}
-}
+import { getShellConfig, killProcessTree } from "./shell-utils.js";
 
 const bashSchema = Type.Object({
 	command: Type.String({ description: "Bash command to execute" }),
@@ -75,7 +17,7 @@ export const bashTool: AgentTool<typeof bashSchema> = {
 	execute: async (
 		_toolCallId: string,
 		{ command, timeout }: { command: string; timeout?: number },
-		signal?: AbortSignal,
+		{ signal }: { signal?: AbortSignal } = {},
 	) => {
 		return new Promise((resolve, _reject) => {
 			const { shell, args } = getShellConfig();

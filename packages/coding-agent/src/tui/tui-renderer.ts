@@ -666,6 +666,12 @@ export class TuiRenderer {
 				break;
 			}
 
+			case "tool_execution_output":
+			case "tool_execution_progress": {
+				// Streaming updates are currently not rendered in the TUI; ignore.
+				break;
+			}
+
 			case "agent_end":
 				// Stop loading animation
 				if (this.loadingAnimation) {
