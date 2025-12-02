@@ -249,6 +249,9 @@ export class TuiRenderer {
 			theme.fg("dim", "ctrl+p") +
 			theme.fg("muted", " to cycle models") +
 			"\n" +
+			theme.fg("dim", "ctrl+b") +
+			theme.fg("muted", " to background running tool") +
+			"\n" +
 			theme.fg("dim", "ctrl+o") +
 			theme.fg("muted", " to expand tools") +
 			"\n" +
@@ -566,7 +569,7 @@ export class TuiRenderer {
 					this.ui,
 					(spinner) => theme.fg("accent", spinner),
 					(text) => theme.fg("muted", text),
-					"Working... (esc to interrupt)",
+					"Working... (esc to interrupt, ctrl+b to background)",
 				);
 				this.statusContainer.addChild(this.loadingAnimation);
 				this.ui.requestRender();

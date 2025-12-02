@@ -4,11 +4,13 @@
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
 	"bin": {
-		"pi": "dist/cli.js"
+		"pi": "dist/cli.js",
+		"tau": "bin/tau-dev.mjs"
 	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
 	"files": [
+		"bin",
 		"dist",
 		"CHANGELOG.md"
 	],
