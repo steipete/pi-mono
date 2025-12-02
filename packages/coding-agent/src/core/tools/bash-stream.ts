@@ -90,7 +90,11 @@ export const bashStreamTool: AgentTool<typeof bashStreamSchema, BashStreamDetail
 			yieldMs?: number;
 			stdinMode?: "pipe" | "pty";
 		},
-		{ signal, emitEvent }: { signal?: AbortSignal; emitEvent?: (event: AgentEvent) => void } = {},
+		{
+			signal,
+			yieldSignal,
+			emitEvent,
+		}: { signal?: AbortSignal; yieldSignal?: AbortSignal; emitEvent?: (event: AgentEvent) => void } = {},
 	) => {
 		if (stdinMode && stdinMode !== "pipe") {
 			throw new Error('Only stdinMode "pipe" is supported right now.');
@@ -140,6 +144,9 @@ export const bashStreamTool: AgentTool<typeof bashStreamSchema, BashStreamDetail
 		const cleanup = () => {
 			signal?.removeEventListener("abort", onAbort);
 		};
+
+		let yieldTimer: NodeJS.Timeout | null = null;
+		let onYieldNow: (() => void) | null = null;
 
 		const onAbort = () => {
 			if (child.pid) {
@@ -193,7 +200,34 @@ export const bashStreamTool: AgentTool<typeof bashStreamSchema, BashStreamDetail
 				);
 			};
 
-			const yieldTimer = setTimeout(() => {
+			onYieldNow = () => {
+				if (yieldTimer) clearTimeout(yieldTimer);
+				if (settled) return;
+				yielded = true;
+				emitEvent?.({
+					type: "tool_execution_progress",
+					toolCallId,
+					sessionId,
+					pid: child.pid ?? undefined,
+					startedAt,
+					tail: session.tail,
+				});
+				resolveRunning();
+			};
+
+			if (yieldSignal?.aborted) {
+				onYieldNow?.();
+			} else if (yieldSignal) {
+				yieldSignal.addEventListener(
+					"abort",
+					() => {
+						onYieldNow?.();
+					},
+					{ once: true },
+				);
+			}
+
+			yieldTimer = setTimeout(() => {
 				if (settled) return;
 				yielded = true;
 				emitEvent?.({
@@ -208,7 +242,7 @@ export const bashStreamTool: AgentTool<typeof bashStreamSchema, BashStreamDetail
 			}, yieldWindow);
 
 			child.once("exit", (code, exitSignal) => {
-				clearTimeout(yieldTimer);
+				if (yieldTimer) clearTimeout(yieldTimer);
 				const durationMs = Date.now() - startedAt;
 				const wasSignal = exitSignal != null;
 				const isSuccess = code === 0 && !wasSignal;
@@ -244,7 +278,7 @@ export const bashStreamTool: AgentTool<typeof bashStreamSchema, BashStreamDetail
 			});
 
 			child.once("error", (err) => {
-				clearTimeout(yieldTimer);
+				if (yieldTimer) clearTimeout(yieldTimer);
 				cleanup();
 				settle(() => reject(err));
 			});

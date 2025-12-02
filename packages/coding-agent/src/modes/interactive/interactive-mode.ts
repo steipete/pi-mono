@@ -89,6 +89,9 @@ export class InteractiveMode {
 
 	// Tool execution tracking: toolCallId -> component
 	private pendingTools = new Map<string, ToolExecutionComponent>();
+	// Soft-yield handles: toolCallId -> requestYield
+	private toolYieldHandles = new Map<string, () => void>();
+	private lastYieldToolCallId: string | null = null;
 
 	// Track if this is the first user message (to skip spacer)
 	private isFirstUserMessage = true;
@@ -235,14 +238,17 @@ export class InteractiveMode {
 			theme.fg("dim", "ctrl+p") +
 			theme.fg("muted", " to cycle models") +
 			"\n" +
-			theme.fg("dim", "ctrl+o") +
-			theme.fg("muted", " to expand tools") +
-			"\n" +
-			theme.fg("dim", "ctrl+t") +
-			theme.fg("muted", " to toggle thinking") +
-			"\n" +
-			theme.fg("dim", "/") +
-			theme.fg("muted", " for commands") +
+				theme.fg("dim", "ctrl+o") +
+				theme.fg("muted", " to expand tools") +
+				"\n" +
+				theme.fg("dim", "ctrl+b") +
+				theme.fg("muted", " to background tool") +
+				"\n" +
+				theme.fg("dim", "ctrl+t") +
+				theme.fg("muted", " to toggle thinking") +
+				"\n" +
+				theme.fg("dim", "/") +
+				theme.fg("muted", " for commands") +
 			"\n" +
 			theme.fg("dim", "!") +
 			theme.fg("muted", " to run bash") +
@@ -598,6 +604,7 @@ export class InteractiveMode {
 		this.editor.onShiftTab = () => this.cycleThinkingLevel();
 		this.editor.onCtrlP = () => this.cycleModel();
 		this.editor.onCtrlO = () => this.toggleToolOutputExpansion();
+		this.editor.onCtrlB = () => this.handleCtrlB();
 		this.editor.onCtrlT = () => this.toggleThinkingBlockVisibility();
 		this.editor.onCtrlG = () => this.openExternalEditor();
 
@@ -867,6 +874,8 @@ export class InteractiveMode {
 							});
 						}
 						this.pendingTools.clear();
+						this.toolYieldHandles.clear();
+						this.lastYieldToolCallId = null;
 					}
 					this.streamingComponent = null;
 					this.footer.invalidate();
@@ -887,8 +896,15 @@ export class InteractiveMode {
 					);
 					this.chatContainer.addChild(component);
 					this.pendingTools.set(event.toolCallId, component);
+					this.lastYieldToolCallId = event.toolCallId;
 					this.ui.requestRender();
 				}
+				break;
+			}
+
+			case "tool_execution_handle": {
+				this.toolYieldHandles.set(event.toolCallId, event.requestYield);
+				this.lastYieldToolCallId = event.toolCallId;
 				break;
 			}
 
@@ -906,6 +922,10 @@ export class InteractiveMode {
 				if (component) {
 					component.updateResult({ ...event.result, isError: event.isError });
 					this.pendingTools.delete(event.toolCallId);
+					this.toolYieldHandles.delete(event.toolCallId);
+					if (this.lastYieldToolCallId === event.toolCallId) {
+						this.lastYieldToolCallId = null;
+					}
 					this.ui.requestRender();
 				}
 				break;
@@ -922,6 +942,8 @@ export class InteractiveMode {
 					this.streamingComponent = null;
 				}
 				this.pendingTools.clear();
+				this.toolYieldHandles.clear();
+				this.lastYieldToolCallId = null;
 				this.ui.requestRender();
 				break;
 
@@ -1229,7 +1251,26 @@ export class InteractiveMode {
 		// Send SIGTSTP to process group (pid=0 means all processes in group)
 		process.kill(0, "SIGTSTP");
 	}
+	private handleCtrlB(): void {
+		const preferredId =
+			this.lastYieldToolCallId && this.toolYieldHandles.has(this.lastYieldToolCallId) ? this.lastYieldToolCallId : null;
+		const fallbackId = this.toolYieldHandles.keys().next().value as string | undefined;
+		const toolCallId = preferredId || fallbackId;
 
+		if (!toolCallId) {
+			this.showStatus("No running tool to background");
+			return;
+		}
+
+		const requestYield = this.toolYieldHandles.get(toolCallId);
+		if (!requestYield) {
+			this.showStatus("No running tool to background");
+			return;
+		}
+
+		this.showStatus("Requesting tool yield (backgrounding)…");
+		requestYield();
+	}
 	private updateEditorBorderColor(): void {
 		if (this.isBashMode) {
 			this.editor.borderColor = theme.getBashModeBorderColor();
