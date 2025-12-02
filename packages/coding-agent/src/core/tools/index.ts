@@ -5,8 +5,10 @@ export { bashStreamTool } from "./bash-stream.js";
 export { createEditTool, editTool } from "./edit.js";
 export { createFindTool, type FindToolDetails, findTool } from "./find.js";
 export { createGrepTool, type GrepToolDetails, grepTool } from "./grep.js";
+export { getProcessLogTool } from "./get-process-log.js";
 export { killProcessTool } from "./kill-process.js";
 export { createLsTool, type LsToolDetails, lsTool } from "./ls.js";
+export { listProcessesTool } from "./list-processes.js";
 export { pollProcessTool } from "./poll-process.js";
 export { createReadTool, type ReadToolDetails, readTool } from "./read.js";
 export type { TruncationResult } from "./truncate.js";
@@ -18,8 +20,10 @@ import { bashStreamTool } from "./bash-stream.js";
 import { createEditTool, editTool } from "./edit.js";
 import { createFindTool, findTool } from "./find.js";
 import { createGrepTool, grepTool } from "./grep.js";
+import { getProcessLogTool } from "./get-process-log.js";
 import { killProcessTool } from "./kill-process.js";
 import { createLsTool, lsTool } from "./ls.js";
+import { listProcessesTool } from "./list-processes.js";
 import { pollProcessTool } from "./poll-process.js";
 import { createReadTool, readTool } from "./read.js";
 import { createWriteTool, writeTool } from "./write.js";
@@ -47,6 +51,8 @@ export const allTools = {
 	poll_process: pollProcessTool,
 	write_stdin: writeStdinTool,
 	kill_process: killProcessTool,
+	list_processes: listProcessesTool,
+	get_process_log: getProcessLogTool,
 };
 
 export type ToolName = keyof typeof allTools;
@@ -81,5 +87,7 @@ export function createAllTools(cwd: string): Record<ToolName, Tool> {
 		poll_process: pollProcessTool,
 		write_stdin: writeStdinTool,
 		kill_process: killProcessTool,
+		list_processes: listProcessesTool,
+		get_process_log: getProcessLogTool,
 	};
 }
