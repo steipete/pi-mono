@@ -96,6 +96,7 @@ export type AgentEvent =
 	| { type: "tool_execution_start"; toolCallId: string; toolName: string; args: any }
 	| { type: "tool_execution_end"; toolCallId: string; toolName: string; result: any; isError: boolean }
 	| { type: "tool_execution_output"; toolCallId: string; stream: "stdout" | "stderr"; chunk: string }
+	| { type: "tool_execution_handle"; toolCallId: string; requestYield: () => void }
 	| {
 			type: "tool_execution_progress";
 			toolCallId: string;

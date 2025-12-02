@@ -72,6 +72,8 @@ export class TuiRenderer {
 
 	// Tool execution tracking: toolCallId -> component
 	private pendingTools = new Map<string, ToolExecutionComponent>();
+	// Soft-yield handles: toolCallId -> requestYield
+	private toolYieldHandles = new Map<string, () => void>();
 
 	// Thinking level selector
 	private thinkingSelector: ThinkingSelectorComponent | null = null;
@@ -326,6 +328,10 @@ export class TuiRenderer {
 
 		this.editor.onCtrlC = () => {
 			this.handleCtrlC();
+		};
+
+		this.editor.onCtrlB = () => {
+			this.handleCtrlB();
 		};
 
 		this.editor.onShiftTab = () => {
@@ -644,6 +650,7 @@ export class TuiRenderer {
 							});
 						}
 						this.pendingTools.clear();
+						this.toolYieldHandles.clear();
 					}
 
 					// Keep the streaming component - it's now the final assistant message
@@ -666,6 +673,11 @@ export class TuiRenderer {
 				break;
 			}
 
+			case "tool_execution_handle": {
+				this.toolYieldHandles.set(event.toolCallId, event.requestYield);
+				break;
+			}
+
 			case "tool_execution_end": {
 				// Update the existing tool component with the result
 				const component = this.pendingTools.get(event.toolCallId);
@@ -685,6 +697,7 @@ export class TuiRenderer {
 								};
 					component.updateResult(resultData);
 					this.pendingTools.delete(event.toolCallId);
+					this.toolYieldHandles.delete(event.toolCallId);
 					this.ui.requestRender();
 				}
 				break;
@@ -709,6 +722,7 @@ export class TuiRenderer {
 					this.streamingComponent = null;
 				}
 				this.pendingTools.clear();
+				this.toolYieldHandles.clear();
 				// Note: Don't need to re-enable submit - we never disable it
 				this.ui.requestRender();
 				break;
@@ -828,6 +842,28 @@ export class TuiRenderer {
 			// First Ctrl+C - clear the editor
 			this.clearEditor();
 			this.lastSigintTime = now;
+		}
+	}
+
+	private handleCtrlB(): void {
+		// Soft-yield the newest pending tool if available
+		const toolIds = Array.from(this.toolYieldHandles.keys());
+		const targetId = toolIds[toolIds.length - 1];
+		if (!targetId) {
+			this.chatContainer.addChild(new Spacer(1));
+			this.chatContainer.addChild(new Text(theme.fg("warning", "No running tool to background"), 1, 0));
+			this.ui.requestRender();
+			return;
+		}
+
+		const yieldFn = this.toolYieldHandles.get(targetId);
+		if (yieldFn) {
+			yieldFn();
+			this.chatContainer.addChild(new Spacer(1));
+			this.chatContainer.addChild(
+				new Text(theme.fg("dim", `Backgrounding tool ${targetId.slice(0, 8)} (Ctrl+B)`), 1, 0),
+			);
+			this.ui.requestRender();
 		}
 	}
 
