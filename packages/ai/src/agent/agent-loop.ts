@@ -227,12 +227,18 @@ async function executeToolCalls<T>(
 		const content: ToolResultMessage<T>["content"] =
 			typeof resultOrError === "string" ? [{ type: "text", text: resultOrError }] : resultOrError.content;
 
+		// Surface tool metadata (e.g., path, command) even when the tool fails
+		const details =
+			typeof resultOrError === "string"
+				? (toolCall.arguments as any)
+				: resultOrError.details ?? (toolCall.arguments as any);
+
 		const toolResultMessage: ToolResultMessage<T> = {
 			role: "toolResult",
 			toolCallId: toolCall.id,
 			toolName: toolCall.name,
 			content,
-			details: typeof resultOrError === "string" ? ({} as T) : resultOrError.details,
+			details,
 			isError,
 			timestamp: Date.now(),
 		};
