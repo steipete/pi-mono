@@ -12,6 +12,7 @@ export class CustomEditor extends Editor {
 	public onCtrlO?: () => void;
 	public onCtrlT?: () => void;
 	public onCtrlB?: () => void;
+	public onArrowDown?: () => void;
 
 	handleInput(data: string): void {
 		// Intercept Ctrl+T for thinking block visibility toggle
@@ -57,15 +58,20 @@ export class CustomEditor extends Editor {
 			return;
 		}
 
-		// Intercept Ctrl+D (only when editor is empty)
-		if (isCtrlD(data)) {
-			if (this.getText().length === 0 && this.onCtrlD) {
-				this.onCtrlD();
+			// Intercept Ctrl+D (only when editor is empty)
+			if (isCtrlD(data)) {
+				if (this.getText().length === 0 && this.onCtrlD) {
+					this.onCtrlD();
 			}
-			// Always consume Ctrl+D (don't pass to parent)
-			return;
-		}
+				// Always consume Ctrl+D (don't pass to parent)
+				return;
+			}
 
+			// Down arrow (only when editor is empty)
+			if (data === "\x1b[B" && this.onArrowDown && !this.getText().trim()) {
+				this.onArrowDown();
+				return;
+			}
 		// Pass to parent for normal handling
 		super.handleInput(data);
 	}
