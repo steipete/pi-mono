@@ -25,6 +25,7 @@ export class CustomEditor extends Editor {
 	public onCtrlG?: () => void;
 	public onCtrlZ?: () => void;
 	public onCtrlB?: () => void;
+	public onArrowDown?: () => void;
 
 	handleInput(data: string): void {
 		// Intercept Ctrl+G for external editor
@@ -91,6 +92,11 @@ export class CustomEditor extends Editor {
 			return;
 		}
 
+		// Down arrow (only when editor is empty)
+		if (data === "\x1b[B" && this.onArrowDown && !this.getText().trim()) {
+			this.onArrowDown();
+			return;
+		}
 		// Pass to parent for normal handling
 		super.handleInput(data);
 	}

@@ -53,6 +53,7 @@ import { DynamicBorder } from "./components/dynamic-border.js";
 import { FooterComponent } from "./components/footer.js";
 import { HookInputComponent } from "./components/hook-input.js";
 import { HookSelectorComponent } from "./components/hook-selector.js";
+import { type JobLogMeta, JobLogView } from "./components/job-log-view.js";
 import { type JobItem, JobsSelectorComponent } from "./components/jobs-selector.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
 import { OAuthSelectorComponent } from "./components/oauth-selector.js";
@@ -607,6 +608,9 @@ export class InteractiveMode {
 		this.editor.onCtrlB = () => this.handleCtrlB();
 		this.editor.onCtrlT = () => this.toggleThinkingBlockVisibility();
 		this.editor.onCtrlG = () => this.openExternalEditor();
+		this.editor.onArrowDown = () => {
+			void this.handleJobsCommand();
+		};
 
 		this.editor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -899,6 +903,11 @@ export class InteractiveMode {
 					this.lastYieldToolCallId = event.toolCallId;
 					this.ui.requestRender();
 				}
+				break;
+			}
+
+			case "tool_execution_progress": {
+				void this.refreshBackgroundCount();
 				break;
 			}
 
@@ -2010,11 +2019,42 @@ export class InteractiveMode {
 		}
 
 		this.showSelector((done) => {
+			const showList = (selector: JobsSelectorComponent) => {
+				this.editorContainer.clear();
+				this.editorContainer.addChild(selector);
+				this.ui.setFocus(selector);
+				this.ui.requestRender();
+			};
+
 			const selector = new JobsSelectorComponent(
 				jobs,
 				(sessionId) => {
-					done();
-					void this.showJobTail(sessionId);
+					void (async () => {
+						const { meta, logText } = await this.fetchJobLog(sessionId, 4000);
+						const view = new JobLogView(
+							meta,
+							logText,
+							() => {
+								done();
+								this.ui.requestRender();
+							},
+							() => {
+								void (async () => {
+									await this.killOrClearSession(meta);
+									const updatedJobs = await this.loadJobItems();
+									selector.updateItems(updatedJobs);
+									showList(selector);
+								})();
+							},
+							() => {
+								showList(selector);
+							},
+						);
+						this.editorContainer.clear();
+						this.editorContainer.addChild(view);
+						this.ui.setFocus(view);
+						this.ui.requestRender();
+					})();
 				},
 				() => {
 					done();
@@ -2022,6 +2062,9 @@ export class InteractiveMode {
 				},
 				(sessionId) => {
 					void this.killJobAndRefresh(sessionId, selector);
+				},
+				(sessionId) => {
+					void this.clearJobAndRefresh(sessionId, selector);
 				},
 			);
 			return { component: selector, focus: selector };
@@ -2060,16 +2103,59 @@ export class InteractiveMode {
 		this.showStatus(this.extractText(result.content) || `Killed session ${sessionId}.`);
 	}
 
-	private async showJobTail(sessionId: string, limit = 4000): Promise<void> {
-		const result = await processTool.execute("ui", { action: "log", sessionId, offset: 0, limit }, {});
-		const output = this.extractText(result.content) || "(no output)";
+	private async killOrClearSession(meta: JobLogMeta): Promise<void> {
+		const action = meta.status === "running" ? "kill" : "clear";
+		const result = await processTool.execute("ui", { action, sessionId: meta.sessionId }, {});
+		const fallback = action === "kill" ? `Killed session ${meta.sessionId}.` : `Cleared session ${meta.sessionId}.`;
+		this.showStatus(this.extractText(result.content) || fallback);
+		await this.refreshBackgroundCount();
+	}
 
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder());
-		this.chatContainer.addChild(new Text(theme.bold(theme.fg("toolTitle", `Tail: ${sessionId}`)), 1, 0));
-		this.chatContainer.addChild(new Text(theme.fg("toolOutput", output), 1, 0));
-		this.chatContainer.addChild(new DynamicBorder());
-		this.ui.requestRender();
+	private async fetchJobLog(sessionId: string, limit: number): Promise<{ meta: JobLogMeta; logText: string }> {
+		const listResult = await processTool.execute("ui", { action: "list" }, {});
+		const sessions = this.extractSessions(listResult.details);
+		const found = sessions.find((s) => s.sessionId === sessionId);
+
+		const logResult = await processTool.execute("ui", { action: "log", sessionId, offset: 0, limit }, {});
+		const logText = this.extractText(logResult.content) || "(no output)";
+
+		const normalizedStatus: JobLogMeta["status"] =
+			found?.status === "running" ? "running" : found?.status === "completed" ? "completed" : "failed";
+
+		const meta: JobLogMeta = {
+			sessionId,
+			status: normalizedStatus,
+			command: found?.command ?? "",
+			runtimeMs: found?.runtimeMs,
+			exitCode: found?.exitCode ?? undefined,
+			exitSignal: found?.exitSignal ?? undefined,
+			truncated: found?.truncated ?? undefined,
+		};
+
+		return { meta, logText };
+	}
+
+	private async showJobTail(sessionId: string, limit = 4000): Promise<void> {
+		const { meta, logText } = await this.fetchJobLog(sessionId, limit);
+
+		this.showSelector((done) => {
+			const view = new JobLogView(
+				meta,
+				logText,
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+				() => {
+					void (async () => {
+						await this.killOrClearSession(meta);
+						done();
+						this.ui.requestRender();
+					})();
+				},
+			);
+			return { component: view, focus: view };
+		});
 	}
 
 	private async killJobAndRefresh(sessionId: string, selector: JobsSelectorComponent): Promise<void> {
@@ -2082,20 +2168,43 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	private async clearJobAndRefresh(sessionId: string, selector: JobsSelectorComponent): Promise<void> {
+		const result = await processTool.execute("ui", { action: "clear", sessionId }, {});
+		this.showStatus(this.extractText(result.content) || `Cleared session ${sessionId}.`);
+
+		const jobs = await this.loadJobItems();
+		selector.updateItems(jobs);
+		this.ui.setFocus(selector);
+		this.ui.requestRender();
+	}
+
+	private async refreshBackgroundCount(): Promise<void> {
+		const result = await processTool.execute("ui", { action: "list" }, {});
+		const sessions = this.extractSessions(result.details);
+		const runningCount = sessions.filter((s) => s.status === "running").length;
+		this.footer.setBackgroundCount(runningCount);
+		this.ui.requestRender();
+	}
+
 	private async loadJobItems(limit = 20): Promise<JobItem[]> {
 		const result = await processTool.execute("ui", { action: "list" }, {});
 		const sessions = this.extractSessions(result.details);
+		const runningCount = sessions.filter((s) => s.status === "running").length;
+		this.footer.setBackgroundCount(runningCount);
 		if (sessions.length === 0) return [];
 
 		return sessions.slice(0, limit).map((s) => {
-			const status = s.status.padEnd(9, " ");
+			const status =
+				s.status === "running" ? "running" : s.status === "completed" ? "completed" : ("failed" as const);
+			const statusLabel = status.padEnd(9, " ");
 			const runtime = this.formatDurationMs(s.runtimeMs);
 			const cmd = this.truncateMiddle(s.command, 80);
 			const truncatedFlag = s.truncated ? " [truncated]" : "";
 			return {
 				sessionId: s.sessionId,
-				label: `${s.sessionId.slice(0, 8)} ${status} ${runtime} :: ${cmd}${truncatedFlag}`,
+				label: `${s.sessionId.slice(0, 8)} ${statusLabel} ${runtime} :: ${cmd}${truncatedFlag}`,
 				description: s.cwd,
+				status,
 			};
 		});
 	}
@@ -2116,6 +2225,8 @@ export class InteractiveMode {
 		cwd?: string;
 		command: string;
 		truncated: boolean;
+		exitCode?: number | null;
+		exitSignal?: number | NodeJS.Signals | null;
 	}> {
 		if (!details || typeof details !== "object") return [];
 		const sessions = (details as { sessions?: unknown }).sessions;
@@ -2128,6 +2239,8 @@ export class InteractiveMode {
 			cwd?: string;
 			command: string;
 			truncated: boolean;
+			exitCode?: number | null;
+			exitSignal?: number | NodeJS.Signals | null;
 		}> = [];
 
 		for (const item of sessions) {
@@ -2138,6 +2251,8 @@ export class InteractiveMode {
 			const cwd = (item as { cwd?: unknown }).cwd;
 			const command = (item as { command?: unknown }).command;
 			const truncated = (item as { truncated?: unknown }).truncated;
+			const exitCode = (item as { exitCode?: unknown }).exitCode;
+			const exitSignal = (item as { exitSignal?: unknown }).exitSignal;
 
 			if (typeof sessionId !== "string") continue;
 			if (typeof status !== "string") continue;
@@ -2151,6 +2266,13 @@ export class InteractiveMode {
 				cwd: typeof cwd === "string" ? cwd : undefined,
 				command,
 				truncated: typeof truncated === "boolean" ? truncated : false,
+				exitCode: typeof exitCode === "number" || exitCode === null ? exitCode : undefined,
+				exitSignal:
+					typeof exitSignal === "number" || exitSignal === null
+						? exitSignal
+						: typeof exitSignal === "string"
+							? (exitSignal as NodeJS.Signals)
+							: undefined,
 			});
 		}
 

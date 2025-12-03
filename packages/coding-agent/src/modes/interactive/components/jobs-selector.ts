@@ -6,6 +6,7 @@ export interface JobItem {
 	sessionId: string;
 	label: string;
 	description?: string;
+	status: "running" | "completed" | "failed";
 }
 
 export class JobsSelectorComponent extends Container {
@@ -14,18 +15,21 @@ export class JobsSelectorComponent extends Container {
 	private readonly onSelect: (sessionId: string) => void;
 	private readonly onCancel: () => void;
 	private readonly onKill?: (sessionId: string) => void;
+	private readonly onClear?: (sessionId: string) => void;
 
 	constructor(
 		jobs: JobItem[],
 		onSelect: (sessionId: string) => void,
 		onCancel: () => void,
 		onKill?: (sessionId: string) => void,
+		onClear?: (sessionId: string) => void,
 	) {
 		super();
 		this.items = jobs;
 		this.onSelect = onSelect;
 		this.onCancel = onCancel;
 		this.onKill = onKill;
+		this.onClear = onClear;
 		this.rebuild();
 	}
 
@@ -37,9 +41,23 @@ export class JobsSelectorComponent extends Container {
 	handleInput(keyData: string): void {
 		if (keyData === "k" || keyData === "K") {
 			const id = this.getSelectedSessionId();
-			if (id && this.onKill) {
-				this.onKill(id);
+			if (id) {
+				const selected = this.items.find((i) => i.sessionId === id);
+				if (selected?.status === "running" && this.onKill) {
+					this.onKill(id);
+				} else if (selected && selected.status !== "running" && this.onClear) {
+					this.onClear(id);
+				}
 			}
+			return;
+		}
+		if (keyData === "\x1b" || keyData === " ") {
+			this.onCancel();
+			return;
+		}
+		if (keyData === "\x1b[D") {
+			// left arrow to cancel (matches log view back intent)
+			this.onCancel();
 			return;
 		}
 		this.selectList?.handleInput(keyData);
@@ -71,7 +89,13 @@ export class JobsSelectorComponent extends Container {
 		}));
 
 		this.addChild(new DynamicBorder());
-		this.addChild(new Text(theme.fg("muted", "Enter: tail · k: kill · Esc: close · /jobs to refresh"), 1, 0));
+		this.addChild(
+			new Text(
+				theme.fg("muted", "Enter: view · k: kill/clear · Esc/Space: close · ←: back · /jobs to refresh"),
+				1,
+				0,
+			),
+		);
 		this.selectList = new SelectList(items, Math.min(8, items.length), getSelectListTheme());
 
 		this.selectList.onSelect = (item) => {
