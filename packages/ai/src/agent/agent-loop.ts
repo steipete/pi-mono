@@ -288,31 +288,31 @@ async function executeToolCalls<T>(
 					emitEvent: (event) => stream.push(event),
 					yieldSignal: yieldController.signal,
 				});
-			} catch (e) {
-				result = {
-					content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
-					details: {} as T,
-				};
-				isError = true;
-			}
+				} catch (e) {
+					result = {
+						content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
+						details: toolCall.arguments as T,
+					};
+					isError = true;
+				}
 
-		stream.push({
+			stream.push({
 			type: "tool_execution_end",
 			toolCallId: toolCall.id,
 			toolName: toolCall.name,
-			result,
-			isError,
-		});
+				result,
+				isError,
+			});
 
-		const toolResultMessage: ToolResultMessage<T> = {
-			role: "toolResult",
-			toolCallId: toolCall.id,
-			toolName: toolCall.name,
-			content: result.content,
-			details: result.details,
-			isError,
-			timestamp: Date.now(),
-		};
+			const toolResultMessage: ToolResultMessage<T> = {
+				role: "toolResult",
+				toolCallId: toolCall.id,
+				toolName: toolCall.name,
+				content: result.content,
+				details: (isError ? toolCall.arguments : (result.details ?? toolCall.arguments)) as T,
+				isError,
+				timestamp: Date.now(),
+			};
 
 		results.push(toolResultMessage);
 		stream.push({ type: "message_start", message: toolResultMessage });
