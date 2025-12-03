@@ -66,17 +66,22 @@ const bashSchema = Type.Object({
 	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
 });
 
-export const bashTool: AgentTool<typeof bashSchema> = {
+type BashDetails = {
+	command: string;
+	timeout?: number;
+};
+
+export const bashTool: AgentTool<typeof bashSchema, BashDetails> = {
 	name: "bash",
 	label: "bash",
 	description:
 		"Execute a bash command in the current working directory. Returns stdout and stderr. Optionally provide a timeout in seconds.",
 	parameters: bashSchema,
-	execute: async (
-		_toolCallId: string,
-		{ command, timeout }: { command: string; timeout?: number },
-		signal?: AbortSignal,
-	) => {
+		execute: async (
+			_toolCallId: string,
+			{ command, timeout }: { command: string; timeout?: number },
+			signal?: AbortSignal,
+		) => {
 		return new Promise((resolve, _reject) => {
 			const { shell, args } = getShellConfig();
 			const child = spawn(shell, [...args, command], {
@@ -165,7 +170,10 @@ export const bashTool: AgentTool<typeof bashSchema> = {
 					if (output) output += "\n\n";
 					_reject(new Error(`${output}Command exited with code ${code}`));
 				} else {
-					resolve({ content: [{ type: "text", text: output || "(no output)" }], details: undefined });
+					resolve({
+						content: [{ type: "text", text: output || "(no output)" }],
+						details: { command, timeout },
+					});
 				}
 			});
 

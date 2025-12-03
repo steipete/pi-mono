@@ -46,21 +46,28 @@ const readSchema = Type.Object({
 const MAX_LINES = 2000;
 const MAX_LINE_LENGTH = 2000;
 
-export const readTool: AgentTool<typeof readSchema> = {
+type ReadDetails = {
+	path: string;
+	offset?: number;
+	limit?: number;
+	mimeType?: string;
+};
+
+export const readTool: AgentTool<typeof readSchema, ReadDetails> = {
 	name: "read",
 	label: "read",
 	description:
 		"Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, defaults to first 2000 lines. Use offset/limit for large files.",
 	parameters: readSchema,
-	execute: async (
-		_toolCallId: string,
-		{ path, offset, limit }: { path: string; offset?: number; limit?: number },
-		signal?: AbortSignal,
-	) => {
-		const absolutePath = resolvePath(expandPath(path));
-		const mimeType = isImageFile(absolutePath);
+		execute: async (
+			_toolCallId: string,
+			{ path, offset, limit }: { path: string; offset?: number; limit?: number },
+			signal?: AbortSignal,
+		) => {
+			const absolutePath = resolvePath(expandPath(path));
+			const mimeType = isImageFile(absolutePath);
 
-		return new Promise<{ content: (TextContent | ImageContent)[]; details: undefined }>((resolve, reject) => {
+			return new Promise<{ content: (TextContent | ImageContent)[]; details: ReadDetails }>((resolve, reject) => {
 			// Check if already aborted
 			if (signal?.aborted) {
 				reject(new Error("Operation aborted"));
@@ -161,7 +168,15 @@ export const readTool: AgentTool<typeof readSchema> = {
 						signal.removeEventListener("abort", onAbort);
 					}
 
-					resolve({ content, details: undefined });
+					resolve({
+						content,
+						details: {
+							path: absolutePath,
+							offset,
+							limit,
+							mimeType: mimeType ?? undefined,
+						},
+					});
 				} catch (error: any) {
 					// Clean up abort handler
 					if (signal) {
