@@ -3,6 +3,7 @@ export { editTool } from "./edit.js";
 export { findTool } from "./find.js";
 export { grepTool } from "./grep.js";
 export { lsTool } from "./ls.js";
+export { processTool } from "./process.js";
 export { readTool } from "./read.js";
 export { writeTool } from "./write.js";
 
@@ -11,6 +12,7 @@ import { editTool } from "./edit.js";
 import { findTool } from "./find.js";
 import { grepTool } from "./grep.js";
 import { lsTool } from "./ls.js";
+import { processTool } from "./process.js";
 import { readTool } from "./read.js";
 import { writeTool } from "./write.js";
 
@@ -26,6 +28,7 @@ export const allTools = {
 	grep: grepTool,
 	find: findTool,
 	ls: lsTool,
+	process: processTool,
 };
 
 export type ToolName = keyof typeof allTools;

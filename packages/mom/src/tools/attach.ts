@@ -23,7 +23,7 @@ export const attachTool: AgentTool<typeof attachSchema> = {
 	execute: async (
 		_toolCallId: string,
 		{ path, title }: { label: string; path: string; title?: string },
-		signal?: AbortSignal,
+		{ signal }: { signal?: AbortSignal } = {},
 	) => {
 		if (!uploadFn) {
 			throw new Error("Upload function not configured");

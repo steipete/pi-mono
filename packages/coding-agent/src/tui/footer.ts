@@ -14,6 +14,7 @@ export class FooterComponent implements Component {
 	private cachedBranch: string | null | undefined = undefined; // undefined = not checked yet, null = not in git repo, string = branch name
 	private gitWatcher: FSWatcher | null = null;
 	private onBranchChange: (() => void) | null = null;
+	private backgroundCount = 0;
 
 	constructor(state: AgentState) {
 		this.state = state;
@@ -64,6 +65,10 @@ export class FooterComponent implements Component {
 
 	updateState(state: AgentState): void {
 		this.state = state;
+	}
+
+	setBackgroundCount(count: number): void {
+		this.backgroundCount = count;
 	}
 
 	invalidate(): void {
@@ -201,6 +206,11 @@ export class FooterComponent implements Component {
 			if (thinkingLevel !== "off") {
 				rightSide = `${modelName} • ${thinkingLevel}`;
 			}
+		}
+		if (this.backgroundCount > 0) {
+			const badgeText = `${this.backgroundCount} background task${this.backgroundCount > 1 ? "s" : ""}`;
+			const badge = theme.fg("accent", badgeText);
+			rightSide = `${badge} ${rightSide}`;
 		}
 
 		const statsLeftWidth = visibleWidth(statsLeft);

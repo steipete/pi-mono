@@ -195,6 +195,14 @@ async function executeToolCalls<T>(
 			args: toolCall.arguments,
 		});
 
+		// Soft-yield controller (distinct from abort)
+		const yieldController = new AbortController();
+		stream.push({
+			type: "tool_execution_handle",
+			toolCallId: toolCall.id,
+			requestYield: () => yieldController.abort(),
+		});
+
 		let resultOrError: AgentToolResult<T> | string;
 		let isError = false;
 
@@ -205,7 +213,11 @@ async function executeToolCalls<T>(
 			const validatedArgs = validateToolArguments(tool, toolCall);
 
 			// Execute with validated, typed arguments
-			resultOrError = await tool.execute(toolCall.id, validatedArgs, signal);
+			resultOrError = await tool.execute(toolCall.id, validatedArgs, {
+				signal,
+				emitEvent: (event) => stream.push(event),
+				yieldSignal: yieldController.signal,
+			});
 		} catch (e) {
 			resultOrError = e instanceof Error ? e.message : String(e);
 			isError = true;

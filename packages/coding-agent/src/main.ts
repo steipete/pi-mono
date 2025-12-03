@@ -13,7 +13,7 @@ import { SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
 import { expandSlashCommand, loadSlashCommands } from "./slash-commands.js";
 import { initTheme } from "./theme/theme.js";
-import { allTools, codingTools, type ToolName } from "./tools/index.js";
+import { allTools, type ToolName } from "./tools/index.js";
 import { ensureTool } from "./tools-manager.js";
 import { SessionSelectorComponent } from "./tui/session-selector.js";
 import { TuiRenderer } from "./tui/tui-renderer.js";
@@ -35,6 +35,11 @@ const defaultModelPerProvider: Record<KnownProvider, string> = {
 
 type Mode = "text" | "json" | "rpc";
 
+const STREAMING_ONLY_TOOLS: ToolName[] = ["process"];
+const NON_STREAMING_ONLY_TOOLS: ToolName[] = [];
+const DEFAULT_STREAMING_TOOLS: ToolName[] = ["read", "bash", "edit", "write", "grep", "find", "ls", "process"];
+const DEFAULT_NON_STREAMING_TOOLS: ToolName[] = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+
 interface Args {
 	provider?: string;
 	model?: string;
@@ -51,6 +56,7 @@ interface Args {
 	tools?: ToolName[];
 	print?: boolean;
 	export?: string;
+	streamingTools?: boolean;
 	messages: string[];
 	fileArgs: string[];
 }
@@ -117,6 +123,10 @@ function parseArgs(args: string[]): Args {
 			result.print = true;
 		} else if (arg === "--export" && i + 1 < args.length) {
 			result.export = args[++i];
+		} else if (arg === "--streaming-tools") {
+			result.streamingTools = true;
+		} else if (arg === "--no-streaming-tools") {
+			result.streamingTools = false;
 		} else if (arg.startsWith("@")) {
 			result.fileArgs.push(arg.slice(1)); // Remove @ prefix
 		} else if (!arg.startsWith("-")) {
@@ -238,7 +248,7 @@ ${chalk.bold("Options:")}
   --no-session            Don't save session (ephemeral)
   --models <patterns>     Comma-separated model patterns for quick cycling with Ctrl+P
   --tools <tools>         Comma-separated list of tools to enable (default: read,bash,edit,write)
-                          Available: read, bash, edit, write, grep, find, ls
+                          Available: read, bash, edit, write, grep, find, ls, process
   --thinking <level>      Set thinking level: off, minimal, low, medium, high
   --export <file>         Export session file to HTML and exit
   --help, -h              Show this help
@@ -307,12 +317,13 @@ ${chalk.bold("Available Tools (default: read, bash, edit, write):")}
 // Tool descriptions for system prompt
 const toolDescriptions: Record<ToolName, string> = {
 	read: "Read file contents",
-	bash: "Execute bash commands (ls, grep, find, etc.)",
+	bash: "Execute bash with streaming output and background continuation",
 	edit: "Make surgical edits to files (find exact text and replace)",
 	write: "Create or overwrite files",
 	grep: "Search file contents for patterns (respects .gitignore)",
 	find: "Find files by glob pattern (respects .gitignore)",
 	ls: "List directory contents",
+	process: "Manage bash sessions: list, poll, logs, write, kill",
 };
 
 function buildSystemPrompt(customPrompt?: string, selectedTools?: ToolName[]): string {
@@ -1124,8 +1135,40 @@ export async function main(args: string[]) {
 		initialThinking = parsed.thinking;
 	}
 
+	// Determine streaming tool mode (CLI flag > env/settings > default true)
+	const streamingToolsEnabled =
+		parsed.streamingTools !== undefined ? parsed.streamingTools : settingsManager.getStreamingTools();
+
 	// Determine which tools to use
-	const selectedTools = parsed.tools ? parsed.tools.map((name) => allTools[name]) : codingTools;
+	const chosenToolNames = (() => {
+		const allowList = streamingToolsEnabled ? DEFAULT_STREAMING_TOOLS : DEFAULT_NON_STREAMING_TOOLS;
+		if (!parsed.tools) return allowList;
+
+		const filtered: ToolName[] = [];
+		for (const name of parsed.tools) {
+			// Skip tools that are incompatible with the chosen mode
+			if (!streamingToolsEnabled && STREAMING_ONLY_TOOLS.includes(name)) {
+				console.error(chalk.yellow(`Skipping tool "${name}" because streaming tools are disabled.`));
+				continue;
+			}
+			if (streamingToolsEnabled && NON_STREAMING_ONLY_TOOLS.includes(name)) {
+				console.error(chalk.yellow(`Skipping tool "${name}" because non-streaming bash is disabled.`));
+				continue;
+			}
+			if (!allowList.includes(name)) {
+				// Allow extras that are mode-compatible (e.g., read) even if not in defaults
+				if (!streamingToolsEnabled && NON_STREAMING_ONLY_TOOLS.includes(name)) continue;
+				if (streamingToolsEnabled && STREAMING_ONLY_TOOLS.includes(name)) filtered.push(name);
+				else if (!STREAMING_ONLY_TOOLS.includes(name) && !NON_STREAMING_ONLY_TOOLS.includes(name))
+					filtered.push(name);
+			} else {
+				filtered.push(name);
+			}
+		}
+		return filtered.length > 0 ? filtered : allowList;
+	})();
+
+	const selectedTools = chosenToolNames.map((name) => allTools[name]).filter(Boolean);
 
 	// Create agent (initialModel can be null in interactive mode)
 	const agent = new Agent({

@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Agent, AgentEvent, AgentState, ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage, Message, Model } from "@mariozechner/pi-ai";
+import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@mariozechner/pi-ai";
 import type { SlashCommand } from "@mariozechner/pi-tui";
 import {
 	CombinedAutocompleteProvider,
@@ -24,12 +24,17 @@ import { getApiKeyForModel, getAvailableModels, invalidateOAuthCache } from "../
 import { listOAuthProviders, login, logout } from "../oauth/index.js";
 import type { SessionManager } from "../session-manager.js";
 import type { SettingsManager } from "../settings-manager.js";
-import { expandSlashCommand, type FileSlashCommand, loadSlashCommands } from "../slash-commands.js";
+import { expandSlashCommand, type FileSlashCommand, loadSlashCommands, parseCommandArgs } from "../slash-commands.js";
 import { getEditorTheme, getMarkdownTheme, onThemeChange, setTheme, theme } from "../theme/theme.js";
+import { processTool } from "../tools/index.js";
+import { listRunningSessions } from "../tools/process-registry.js";
 import { AssistantMessageComponent } from "./assistant-message.js";
 import { CustomEditor } from "./custom-editor.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { FooterComponent } from "./footer.js";
+import { JobLogView } from "./job-log-view.js";
+import type { JobItem } from "./jobs-selector.js";
+import { JobsSelectorComponent } from "./jobs-selector.js";
 import { ModelSelectorComponent } from "./model-selector.js";
 import { OAuthSelectorComponent } from "./oauth-selector.js";
 import { QueueModeSelectorComponent } from "./queue-mode-selector.js";
@@ -38,6 +43,8 @@ import { ThinkingSelectorComponent } from "./thinking-selector.js";
 import { ToolExecutionComponent } from "./tool-execution.js";
 import { UserMessageComponent } from "./user-message.js";
 import { UserMessageSelectorComponent } from "./user-message-selector.js";
+
+const BACKGROUND_HINT_DELAY_MS = 10_000;
 
 /**
  * TUI renderer for the coding agent
@@ -59,6 +66,7 @@ export class TuiRenderer {
 	private loadingAnimation: Loader | null = null;
 
 	private lastSigintTime = 0;
+	private backgroundHintTimer: NodeJS.Timeout | null = null;
 	private changelogMarkdown: string | null = null;
 	private newVersion: string | null = null;
 
@@ -70,6 +78,8 @@ export class TuiRenderer {
 
 	// Tool execution tracking: toolCallId -> component
 	private pendingTools = new Map<string, ToolExecutionComponent>();
+	// Soft-yield handles: toolCallId -> requestYield
+	private toolYieldHandles = new Map<string, () => void>();
 
 	// Thinking level selector
 	private thinkingSelector: ThinkingSelectorComponent | null = null;
@@ -79,6 +89,13 @@ export class TuiRenderer {
 
 	// Theme selector
 	private themeSelector: ThemeSelectorComponent | null = null;
+
+	// Jobs selector
+	private jobsSelector: JobsSelectorComponent | null = null;
+	private jobsRefreshTimer: NodeJS.Timeout | null = null;
+	private jobsItems: JobItem[] = [];
+	private jobsSessions: any[] = [];
+	private jobLogView: JobLogView | null = null;
 
 	// Model selector
 	private modelSelector: ModelSelectorComponent | null = null;
@@ -195,6 +212,14 @@ export class TuiRenderer {
 			description: cmd.description,
 		}));
 
+		// Built-in dynamic slash commands
+		const builtinSlashCommands: SlashCommand[] = [
+			{
+				name: "jobs",
+				description: "List running/recent jobs; Enter to tail, k to kill",
+			},
+		];
+
 		// Setup autocomplete for file paths and slash commands
 		const autocompleteProvider = new CombinedAutocompleteProvider(
 			[
@@ -209,6 +234,7 @@ export class TuiRenderer {
 				logoutCommand,
 				queueCommand,
 				clearCommand,
+				...builtinSlashCommands,
 				...fileSlashCommands,
 			],
 			process.cwd(),
@@ -240,6 +266,9 @@ export class TuiRenderer {
 			"\n" +
 			theme.fg("dim", "ctrl+p") +
 			theme.fg("muted", " to cycle models") +
+			"\n" +
+			theme.fg("dim", "ctrl+b") +
+			theme.fg("muted", " to background running tool") +
 			"\n" +
 			theme.fg("dim", "ctrl+o") +
 			theme.fg("muted", " to expand tools") +
@@ -322,6 +351,10 @@ export class TuiRenderer {
 			this.handleCtrlC();
 		};
 
+		this.editor.onCtrlB = () => {
+			this.handleCtrlB();
+		};
+
 		this.editor.onShiftTab = () => {
 			this.cycleThinkingLevel();
 		};
@@ -332,6 +365,13 @@ export class TuiRenderer {
 
 		this.editor.onCtrlO = () => {
 			this.toggleToolOutputExpansion();
+		};
+
+		this.editor.onArrowDown = () => {
+			// Jump to jobs popover if any background tasks exist
+			if (listRunningSessions().length > 0) {
+				void this.handleJobsCommand({ silent: true });
+			}
 		};
 
 		// Handle editor submission
@@ -421,6 +461,24 @@ export class TuiRenderer {
 			// Check for /debug command
 			if (text === "/debug") {
 				this.handleDebugCommand();
+				this.editor.setText("");
+				return;
+			}
+
+			if (text === "/jobs") {
+				await this.handleJobsCommand();
+				this.editor.setText("");
+				return;
+			}
+
+			if (text.startsWith("/tail")) {
+				await this.handleTailCommand(text);
+				this.editor.setText("");
+				return;
+			}
+
+			if (text.startsWith("/kill")) {
+				await this.handleKillCommand(text);
 				this.editor.setText("");
 				return;
 			}
@@ -522,6 +580,7 @@ export class TuiRenderer {
 
 		// Update footer with current stats
 		this.footer.updateState(state);
+		this.refreshBackgroundCount();
 
 		switch (event.type) {
 			case "agent_start":
@@ -539,6 +598,14 @@ export class TuiRenderer {
 					"Working... (esc to interrupt)",
 				);
 				this.statusContainer.addChild(this.loadingAnimation);
+				if (this.backgroundHintTimer) {
+					clearTimeout(this.backgroundHintTimer);
+				}
+				this.backgroundHintTimer = setTimeout(() => {
+					if (this.loadingAnimation) {
+						this.loadingAnimation.setMessage("Working... (esc to interrupt, ctrl+b to background)");
+					}
+				}, BACKGROUND_HINT_DELAY_MS);
 				this.ui.requestRender();
 				break;
 
@@ -620,6 +687,7 @@ export class TuiRenderer {
 							});
 						}
 						this.pendingTools.clear();
+						this.toolYieldHandles.clear();
 					}
 
 					// Keep the streaming component - it's now the final assistant message
@@ -642,6 +710,11 @@ export class TuiRenderer {
 				break;
 			}
 
+			case "tool_execution_handle": {
+				this.toolYieldHandles.set(event.toolCallId, event.requestYield);
+				break;
+			}
+
 			case "tool_execution_end": {
 				// Update the existing tool component with the result
 				const component = this.pendingTools.get(event.toolCallId);
@@ -661,8 +734,16 @@ export class TuiRenderer {
 								};
 					component.updateResult(resultData);
 					this.pendingTools.delete(event.toolCallId);
+					this.toolYieldHandles.delete(event.toolCallId);
 					this.ui.requestRender();
 				}
+				break;
+			}
+
+			case "tool_execution_output":
+			case "tool_execution_progress": {
+				// Refresh jobs list when progress arrives so tails/runtime stay fresh
+				this.scheduleJobsRefresh();
 				break;
 			}
 
@@ -673,11 +754,16 @@ export class TuiRenderer {
 					this.loadingAnimation = null;
 					this.statusContainer.clear();
 				}
+				if (this.backgroundHintTimer) {
+					clearTimeout(this.backgroundHintTimer);
+					this.backgroundHintTimer = null;
+				}
 				if (this.streamingComponent) {
 					this.chatContainer.removeChild(this.streamingComponent);
 					this.streamingComponent = null;
 				}
 				this.pendingTools.clear();
+				this.toolYieldHandles.clear();
 				// Note: Don't need to re-enable submit - we never disable it
 				this.ui.requestRender();
 				break;
@@ -797,6 +883,33 @@ export class TuiRenderer {
 			// First Ctrl+C - clear the editor
 			this.clearEditor();
 			this.lastSigintTime = now;
+		}
+	}
+
+	private refreshBackgroundCount(): void {
+		const count = listRunningSessions().length;
+		this.footer.setBackgroundCount(count);
+	}
+
+	private handleCtrlB(): void {
+		// Soft-yield the newest pending tool if available
+		const toolIds = Array.from(this.toolYieldHandles.keys());
+		const targetId = toolIds[toolIds.length - 1];
+		if (!targetId) {
+			this.chatContainer.addChild(new Spacer(1));
+			this.chatContainer.addChild(new Text(theme.fg("warning", "No running tool to background"), 1, 0));
+			this.ui.requestRender();
+			return;
+		}
+
+		const yieldFn = this.toolYieldHandles.get(targetId);
+		if (yieldFn) {
+			yieldFn();
+			this.chatContainer.addChild(new Spacer(1));
+			this.chatContainer.addChild(
+				new Text(theme.fg("dim", `Backgrounding tool ${targetId.slice(0, 8)} (Ctrl+B)`), 1, 0),
+			);
+			this.ui.requestRender();
 		}
 	}
 
@@ -956,6 +1069,239 @@ export class TuiRenderer {
 		}
 
 		this.ui.requestRender();
+	}
+
+	private async handleJobsCommand(options: { silent?: boolean } = {}): Promise<void> {
+		const { silent } = options;
+		try {
+			const result = await processTool.execute("tui/list_processes", { action: "list" } as any);
+			const sessions: any[] = (result.details as any).sessions ?? [];
+			this.jobsSessions = sessions;
+			this.jobsItems =
+				sessions.map((s) => {
+					const statusColor = s.status === "running" ? "accent" : s.status === "completed" ? "success" : "error";
+					const statusLabel = theme.fg(statusColor, s.status);
+					const label = `${s.sessionId.slice(0, 8)} ${statusLabel} ${formatDuration(Math.max(0, s.runtimeMs ?? 0))}`;
+					const actionHint = s.status === "running" ? "k: kill" : "k: clear";
+					return {
+						sessionId: s.sessionId,
+						status: s.status,
+						label,
+						description: `${truncateMiddle(s.command ?? "", 80)} · ${actionHint}`,
+					} satisfies JobItem;
+				}) ?? [];
+			if (this.jobsSelector) {
+				this.jobsSelector.updateItems(this.jobsItems);
+			} else if (this.jobLogView) {
+				// stay in log view but keep data fresh
+				this.ui.requestRender();
+			} else {
+				this.showJobsSelector(this.jobsItems);
+			}
+
+			if (!silent) {
+				const listText = extractTextContent(result.content);
+				if (listText) {
+					this.chatContainer.addChild(new Spacer(1));
+					this.chatContainer.addChild(new Text(theme.fg("dim", listText)));
+					this.ui.requestRender();
+				}
+			}
+		} catch (err: any) {
+			this.showError(`Failed to list jobs: ${err.message || String(err)}`);
+		}
+	}
+
+	private async handleTailCommand(text: string): Promise<void> {
+		const args = parseCommandArgs(text.slice("/tail".length).trim());
+		const sessionId = args[0];
+		const limit = args[1] ? Number.parseInt(args[1], 10) || undefined : undefined;
+		if (!sessionId) {
+			this.showError("Usage: /tail <sessionId> [limit]");
+			return;
+		}
+		await this.showTailForSession(sessionId, { limit });
+	}
+
+	private async handleKillCommand(text: string): Promise<void> {
+		const args = parseCommandArgs(text.slice("/kill".length).trim());
+		const sessionId = args[0];
+		if (!sessionId) {
+			this.showError("Usage: /kill <sessionId>");
+			return;
+		}
+		try {
+			const result = await processTool.execute("tui/kill_process", { action: "kill", sessionId } as any);
+			const message = extractTextContent(result.content) || `Kill sent to ${sessionId}`;
+			this.chatContainer.addChild(new Spacer(1));
+			this.chatContainer.addChild(new Text(theme.fg("warning", message)));
+			this.ui.requestRender();
+		} catch (err: any) {
+			this.showError(`Failed to kill ${sessionId}: ${err.message || String(err)}`);
+		}
+	}
+
+	private async showTailForSession(
+		sessionId: string,
+		options: { limit?: number; fromSelector?: boolean } = {},
+	): Promise<void> {
+		const { limit, fromSelector } = options;
+		try {
+			const result = await processTool.execute("tui/get_process_log", {
+				action: "log",
+				sessionId,
+				offset: 0,
+				limit: limit ?? 4000,
+			} as any);
+			const text = extractTextContent(result.content) || "(no output)";
+			const details: any = result.details ?? {};
+			const sessionSummary = this.jobsSessions.find((s) => s.sessionId === sessionId) ?? details;
+			const status: "running" | "completed" | "failed" =
+				(sessionSummary?.status as any) || (details.status as any) || "running";
+			const runtimeMs = sessionSummary?.runtimeMs ?? undefined;
+			const command = sessionSummary?.command ?? "(command unknown)";
+
+			this.showJobLogView(
+				{
+					sessionId,
+					status,
+					command,
+					runtimeMs,
+					exitCode: details.exitCode ?? sessionSummary?.exitCode,
+					exitSignal: details.exitSignal ?? sessionSummary?.exitSignal,
+					truncated: details.truncated ?? sessionSummary?.truncated,
+				},
+				text,
+				fromSelector ?? false,
+			);
+		} catch (err: any) {
+			this.showError(`Failed to fetch log for ${sessionId}: ${err.message || String(err)}`);
+		}
+	}
+
+	private showJobLogView(
+		meta: {
+			sessionId: string;
+			status: "running" | "completed" | "failed";
+			command: string;
+			runtimeMs?: number;
+			exitCode?: number | null;
+			exitSignal?: number | NodeJS.Signals | null;
+			truncated?: boolean;
+		},
+		logText: string,
+		fromSelector: boolean,
+	): void {
+		const killOrClear = () => {
+			if (meta.status === "running") {
+				this.killFromJobsSelector(meta.sessionId);
+			} else {
+				this.clearFromJobsSelector(meta.sessionId);
+			}
+		};
+
+		const onClose = () => {
+			this.hideJobLogView(false);
+			if (!fromSelector) {
+				this.hideJobsSelector();
+			}
+		};
+
+		const onBack = () => {
+			this.hideJobLogView(false);
+			this.showJobsSelector(this.jobsItems);
+		};
+
+		this.jobLogView = new JobLogView(meta, logText, onClose, killOrClear, fromSelector ? onBack : undefined);
+		this.editorContainer.clear();
+		this.editorContainer.addChild(this.jobLogView);
+		this.ui.setFocus(this.jobLogView as any);
+		this.ui.requestRender();
+	}
+
+	private hideJobLogView(focusEditor = true): void {
+		if (!this.jobLogView) return;
+		this.jobLogView = null;
+		this.editorContainer.clear();
+		if (this.jobsSelector) {
+			this.editorContainer.addChild(this.jobsSelector);
+			const select = this.jobsSelector.getSelectList();
+			if (select) {
+				this.ui.setFocus(select);
+			}
+		} else {
+			this.editorContainer.addChild(this.editor);
+			if (focusEditor) {
+				this.ui.setFocus(this.editor);
+			}
+		}
+		this.ui.requestRender();
+	}
+
+	private showJobsSelector(items: JobItem[]): void {
+		this.jobsSelector = new JobsSelectorComponent(
+			items,
+			(sessionId) => {
+				this.hideJobLogView();
+				this.hideJobsSelector(false);
+				void this.showTailForSession(sessionId, { fromSelector: true });
+			},
+			() => this.hideJobsSelector(),
+			(sessionId) => void this.killFromJobsSelector(sessionId),
+			(sessionId) => void this.clearFromJobsSelector(sessionId),
+		);
+		this.editorContainer.clear();
+		this.editorContainer.addChild(this.jobsSelector);
+		const select = this.jobsSelector.getSelectList();
+		if (select) {
+			this.ui.setFocus(select);
+		} else {
+			// No jobs; keep focus on editor
+			this.ui.setFocus(this.editor);
+		}
+		this.ui.requestRender();
+	}
+
+	private hideJobsSelector(focusEditor = true): void {
+		if (!this.jobsSelector) return;
+		this.editorContainer.clear();
+		this.editorContainer.addChild(this.editor);
+		this.jobsSelector = null;
+		if (focusEditor) {
+			this.ui.setFocus(this.editor);
+		}
+		this.ui.requestRender();
+	}
+
+	private killFromJobsSelector(sessionId: string): void {
+		void this.handleKillCommand(`/kill ${sessionId}`).then(async () => {
+			await this.handleJobsCommand({ silent: true });
+			this.refreshBackgroundCount();
+		});
+	}
+
+	private clearFromJobsSelector(sessionId: string): void {
+		void (async () => {
+			try {
+				await processTool.execute("tui/clear_process", { action: "clear", sessionId } as any);
+				await this.handleJobsCommand({ silent: true });
+				if (this.jobsItems.length === 0) {
+					this.hideJobsSelector();
+				}
+				this.refreshBackgroundCount();
+			} catch (err: any) {
+				this.showError(`Failed to clear ${sessionId}: ${err.message || String(err)}`);
+			}
+		})();
+	}
+
+	private scheduleJobsRefresh(): void {
+		if (!this.jobsSelector && !this.jobLogView) return;
+		if (this.jobsRefreshTimer) return;
+		this.jobsRefreshTimer = setTimeout(() => {
+			this.jobsRefreshTimer = null;
+			void this.handleJobsCommand({ silent: true });
+		}, 300);
 	}
 
 	clearEditor(): void {
@@ -1600,4 +1946,25 @@ export class TuiRenderer {
 			this.isInitialized = false;
 		}
 	}
+}
+
+function formatDuration(ms: number): string {
+	if (ms < 1000) return `${ms}ms`;
+	const seconds = Math.floor(ms / 1000);
+	if (seconds < 60) return `${seconds}s`;
+	const minutes = Math.floor(seconds / 60);
+	const rem = seconds % 60;
+	return `${minutes}m${rem.toString().padStart(2, "0")}s`;
+}
+
+function truncateMiddle(str: string, max: number): string {
+	if (!str) return "";
+	if (str.length <= max) return str;
+	const half = Math.floor((max - 3) / 2);
+	return `${str.slice(0, half)}...${str.slice(str.length - half)}`;
+}
+
+function extractTextContent(content?: (TextContent | ImageContent)[]): string {
+	const textBlock = content?.find((c) => (c as any).type === "text") as TextContent | undefined;
+	return textBlock?.text ?? "";
 }

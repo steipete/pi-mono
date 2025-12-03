@@ -103,7 +103,7 @@ export function createEditTool(executor: Executor): AgentTool<typeof editSchema>
 		execute: async (
 			_toolCallId: string,
 			{ path, oldText, newText }: { label: string; path: string; oldText: string; newText: string },
-			signal?: AbortSignal,
+			{ signal }: { signal?: AbortSignal } = {},
 		) => {
 			// Read the file
 			const readResult = await executor.exec(`cat ${shellEscape(path)}`, { signal });
