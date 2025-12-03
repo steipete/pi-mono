@@ -1,6 +1,7 @@
 import type { AgentTool } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import {
+	deleteSession,
 	drainSession,
 	getFinishedSession,
 	getSession,
@@ -17,6 +18,7 @@ const processSchema = Type.Object({
 		Type.Literal("log"),
 		Type.Literal("write"),
 		Type.Literal("kill"),
+		Type.Literal("clear"),
 	]),
 	sessionId: Type.Optional(Type.String({ description: "Session id for actions other than list" })),
 	data: Type.Optional(Type.String({ description: "Data to write for write action" })),
@@ -250,6 +252,22 @@ export const processTool: AgentTool<typeof processSchema> = {
 				markExited(session, null, "SIGKILL", "failed");
 				return {
 					content: [{ type: "text", text: `Killed session ${sessionId}.` }],
+					details: { status: "failed" },
+					status: "failed",
+				};
+			}
+
+			case "clear": {
+				if (finished) {
+					deleteSession(sessionId);
+					return {
+						content: [{ type: "text", text: `Cleared session ${sessionId}.` }],
+						details: { status: "completed" },
+						status: "completed",
+					};
+				}
+				return {
+					content: [{ type: "text", text: `No finished session found for ${sessionId}` }],
 					details: { status: "failed" },
 					status: "failed",
 				};

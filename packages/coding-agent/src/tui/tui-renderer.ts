@@ -32,6 +32,8 @@ import { AssistantMessageComponent } from "./assistant-message.js";
 import { CustomEditor } from "./custom-editor.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { FooterComponent } from "./footer.js";
+import { JobLogView } from "./job-log-view.js";
+import type { JobItem } from "./jobs-selector.js";
 import { JobsSelectorComponent } from "./jobs-selector.js";
 import { ModelSelectorComponent } from "./model-selector.js";
 import { OAuthSelectorComponent } from "./oauth-selector.js";
@@ -91,6 +93,9 @@ export class TuiRenderer {
 	// Jobs selector
 	private jobsSelector: JobsSelectorComponent | null = null;
 	private jobsRefreshTimer: NodeJS.Timeout | null = null;
+	private jobsItems: JobItem[] = [];
+	private jobsSessions: any[] = [];
+	private jobLogView: JobLogView | null = null;
 
 	// Model selector
 	private modelSelector: ModelSelectorComponent | null = null;
@@ -360,6 +365,13 @@ export class TuiRenderer {
 
 		this.editor.onCtrlO = () => {
 			this.toggleToolOutputExpansion();
+		};
+
+		this.editor.onArrowDown = () => {
+			// Jump to jobs popover if any background tasks exist
+			if (listRunningSessions().length > 0) {
+				void this.handleJobsCommand({ silent: true });
+			}
 		};
 
 		// Handle editor submission
@@ -1064,16 +1076,27 @@ export class TuiRenderer {
 		try {
 			const result = await processTool.execute("tui/list_processes", { action: "list" } as any);
 			const sessions: any[] = (result.details as any).sessions ?? [];
-			const items =
-				sessions.map((s) => ({
-					sessionId: s.sessionId,
-					label: `${s.sessionId.slice(0, 8)} ${s.status} ${formatDuration(Math.max(0, s.runtimeMs ?? 0))}`,
-					description: truncateMiddle(s.command ?? "", 80),
-				})) ?? [];
+			this.jobsSessions = sessions;
+			this.jobsItems =
+				sessions.map((s) => {
+					const statusColor = s.status === "running" ? "accent" : s.status === "completed" ? "success" : "error";
+					const statusLabel = theme.fg(statusColor, s.status);
+					const label = `${s.sessionId.slice(0, 8)} ${statusLabel} ${formatDuration(Math.max(0, s.runtimeMs ?? 0))}`;
+					const actionHint = s.status === "running" ? "k: kill" : "k: clear";
+					return {
+						sessionId: s.sessionId,
+						status: s.status,
+						label,
+						description: `${truncateMiddle(s.command ?? "", 80)} · ${actionHint}`,
+					} satisfies JobItem;
+				}) ?? [];
 			if (this.jobsSelector) {
-				this.jobsSelector.updateItems(items);
+				this.jobsSelector.updateItems(this.jobsItems);
+			} else if (this.jobLogView) {
+				// stay in log view but keep data fresh
+				this.ui.requestRender();
 			} else {
-				this.showJobsSelector(items);
+				this.showJobsSelector(this.jobsItems);
 			}
 
 			if (!silent) {
@@ -1097,7 +1120,7 @@ export class TuiRenderer {
 			this.showError("Usage: /tail <sessionId> [limit]");
 			return;
 		}
-		await this.showTailForSession(sessionId, limit);
+		await this.showTailForSession(sessionId, { limit });
 	}
 
 	private async handleKillCommand(text: string): Promise<void> {
@@ -1118,7 +1141,11 @@ export class TuiRenderer {
 		}
 	}
 
-	private async showTailForSession(sessionId: string, limit?: number): Promise<void> {
+	private async showTailForSession(
+		sessionId: string,
+		options: { limit?: number; fromSelector?: boolean } = {},
+	): Promise<void> {
+		const { limit, fromSelector } = options;
 		try {
 			const result = await processTool.execute("tui/get_process_log", {
 				action: "log",
@@ -1127,24 +1154,101 @@ export class TuiRenderer {
 				limit: limit ?? 4000,
 			} as any);
 			const text = extractTextContent(result.content) || "(no output)";
-			this.chatContainer.addChild(new Spacer(1));
-			this.chatContainer.addChild(new Text(theme.fg("muted", `Log for ${sessionId.slice(0, 8)}`), 1, 0));
-			this.chatContainer.addChild(new Markdown(text, 1, 0, getMarkdownTheme()));
-			this.ui.requestRender();
+			const details: any = result.details ?? {};
+			const sessionSummary = this.jobsSessions.find((s) => s.sessionId === sessionId) ?? details;
+			const status: "running" | "completed" | "failed" =
+				(sessionSummary?.status as any) || (details.status as any) || "running";
+			const runtimeMs = sessionSummary?.runtimeMs ?? undefined;
+			const command = sessionSummary?.command ?? "(command unknown)";
+
+			this.showJobLogView(
+				{
+					sessionId,
+					status,
+					command,
+					runtimeMs,
+					exitCode: details.exitCode ?? sessionSummary?.exitCode,
+					exitSignal: details.exitSignal ?? sessionSummary?.exitSignal,
+					truncated: details.truncated ?? sessionSummary?.truncated,
+				},
+				text,
+				fromSelector ?? false,
+			);
 		} catch (err: any) {
 			this.showError(`Failed to fetch log for ${sessionId}: ${err.message || String(err)}`);
 		}
 	}
 
-	private showJobsSelector(items: { sessionId: string; label: string; description?: string }[]): void {
+	private showJobLogView(
+		meta: {
+			sessionId: string;
+			status: "running" | "completed" | "failed";
+			command: string;
+			runtimeMs?: number;
+			exitCode?: number | null;
+			exitSignal?: number | NodeJS.Signals | null;
+			truncated?: boolean;
+		},
+		logText: string,
+		fromSelector: boolean,
+	): void {
+		const killOrClear = () => {
+			if (meta.status === "running") {
+				this.killFromJobsSelector(meta.sessionId);
+			} else {
+				this.clearFromJobsSelector(meta.sessionId);
+			}
+		};
+
+		const onClose = () => {
+			this.hideJobLogView(false);
+			if (!fromSelector) {
+				this.hideJobsSelector();
+			}
+		};
+
+		const onBack = () => {
+			this.hideJobLogView(false);
+			this.showJobsSelector(this.jobsItems);
+		};
+
+		this.jobLogView = new JobLogView(meta, logText, onClose, killOrClear, fromSelector ? onBack : undefined);
+		this.editorContainer.clear();
+		this.editorContainer.addChild(this.jobLogView);
+		this.ui.setFocus(this.jobLogView as any);
+		this.ui.requestRender();
+	}
+
+	private hideJobLogView(focusEditor = true): void {
+		if (!this.jobLogView) return;
+		this.jobLogView = null;
+		this.editorContainer.clear();
+		if (this.jobsSelector) {
+			this.editorContainer.addChild(this.jobsSelector);
+			const select = this.jobsSelector.getSelectList();
+			if (select) {
+				this.ui.setFocus(select);
+			}
+		} else {
+			this.editorContainer.addChild(this.editor);
+			if (focusEditor) {
+				this.ui.setFocus(this.editor);
+			}
+		}
+		this.ui.requestRender();
+	}
+
+	private showJobsSelector(items: JobItem[]): void {
 		this.jobsSelector = new JobsSelectorComponent(
 			items,
 			(sessionId) => {
-				this.hideJobsSelector();
-				void this.showTailForSession(sessionId);
+				this.hideJobLogView();
+				this.hideJobsSelector(false);
+				void this.showTailForSession(sessionId, { fromSelector: true });
 			},
 			() => this.hideJobsSelector(),
 			(sessionId) => void this.killFromJobsSelector(sessionId),
+			(sessionId) => void this.clearFromJobsSelector(sessionId),
 		);
 		this.editorContainer.clear();
 		this.editorContainer.addChild(this.jobsSelector);
@@ -1158,21 +1262,41 @@ export class TuiRenderer {
 		this.ui.requestRender();
 	}
 
-	private hideJobsSelector(): void {
+	private hideJobsSelector(focusEditor = true): void {
 		if (!this.jobsSelector) return;
 		this.editorContainer.clear();
 		this.editorContainer.addChild(this.editor);
 		this.jobsSelector = null;
-		this.ui.setFocus(this.editor);
+		if (focusEditor) {
+			this.ui.setFocus(this.editor);
+		}
 		this.ui.requestRender();
 	}
 
 	private killFromJobsSelector(sessionId: string): void {
-		void this.handleKillCommand(`/kill ${sessionId}`);
+		void this.handleKillCommand(`/kill ${sessionId}`).then(async () => {
+			await this.handleJobsCommand({ silent: true });
+			this.refreshBackgroundCount();
+		});
+	}
+
+	private clearFromJobsSelector(sessionId: string): void {
+		void (async () => {
+			try {
+				await processTool.execute("tui/clear_process", { action: "clear", sessionId } as any);
+				await this.handleJobsCommand({ silent: true });
+				if (this.jobsItems.length === 0) {
+					this.hideJobsSelector();
+				}
+				this.refreshBackgroundCount();
+			} catch (err: any) {
+				this.showError(`Failed to clear ${sessionId}: ${err.message || String(err)}`);
+			}
+		})();
 	}
 
 	private scheduleJobsRefresh(): void {
-		if (!this.jobsSelector) return;
+		if (!this.jobsSelector && !this.jobLogView) return;
 		if (this.jobsRefreshTimer) return;
 		this.jobsRefreshTimer = setTimeout(() => {
 			this.jobsRefreshTimer = null;

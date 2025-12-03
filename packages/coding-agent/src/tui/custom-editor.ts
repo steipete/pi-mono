@@ -10,6 +10,7 @@ export class CustomEditor extends Editor {
 	public onCtrlP?: () => void;
 	public onCtrlO?: () => void;
 	public onCtrlB?: () => void;
+	public onArrowDown?: () => void;
 
 	handleInput(data: string): void {
 		// Intercept Ctrl+O for tool output expansion
@@ -46,6 +47,12 @@ export class CustomEditor extends Editor {
 		// Intercept Ctrl+C
 		if (data === "\x03" && this.onCtrlC) {
 			this.onCtrlC();
+			return;
+		}
+
+		// Down arrow
+		if (data === "\x1b[B" && this.onArrowDown) {
+			this.onArrowDown();
 			return;
 		}
 

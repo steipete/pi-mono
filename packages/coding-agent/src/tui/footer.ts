@@ -201,14 +201,16 @@ export class FooterComponent implements Component {
 
 		// Add thinking level hint if model supports reasoning and thinking is enabled
 		let rightSide = modelName;
-		if (this.backgroundCount > 0) {
-			rightSide = `${theme.fg("accent", `bg:${this.backgroundCount}`)} ${rightSide}`;
-		}
 		if (this.state.model?.reasoning) {
 			const thinkingLevel = this.state.thinkingLevel || "off";
 			if (thinkingLevel !== "off") {
 				rightSide = `${modelName} • ${thinkingLevel}`;
 			}
+		}
+		if (this.backgroundCount > 0) {
+			const badgeText = `${this.backgroundCount} background task${this.backgroundCount > 1 ? "s" : ""}`;
+			const badge = theme.fg("accent", badgeText);
+			rightSide = `${badge} ${rightSide}`;
 		}
 
 		const statsLeftWidth = visibleWidth(statsLeft);
