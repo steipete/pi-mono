@@ -292,7 +292,7 @@ async function executeToolCalls<T>(
 		} catch (e) {
 			result = {
 				content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
-				details: {} as T,
+				details: toolCall.arguments as T,
 			};
 			isError = true;
 		}
@@ -310,7 +310,7 @@ async function executeToolCalls<T>(
 			toolCallId: toolCall.id,
 			toolName: toolCall.name,
 			content: result.content,
-			details: result.details,
+			details: (isError ? toolCall.arguments : (result.details ?? toolCall.arguments)) as T,
 			isError,
 			timestamp: Date.now(),
 		};
