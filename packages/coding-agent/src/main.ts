@@ -6,7 +6,7 @@ import { existsSync, readFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { extname, join, resolve } from "path";
 import { getChangelogPath, getNewEntries, parseChangelog } from "./changelog.js";
-import { calculateContextTokens, compact, shouldCompact } from "./compaction.js";
+import { calculateContextTokens, compact, getLastAssistantUsage, shouldCompact } from "./compaction.js";
 import {
 	APP_NAME,
 	CONFIG_DIR_NAME,
@@ -855,22 +855,27 @@ async function runRpcMode(
 		const settings = settingsManager.getCompactionSettings();
 		if (!settings.enabled) return;
 
-		// Get last non-aborted assistant message
-		const messages = agent.state.messages;
-		let lastAssistant: AssistantMessage | null = null;
-		for (let i = messages.length - 1; i >= 0; i--) {
-			const msg = messages[i];
-			if (msg.role === "assistant") {
-				const assistantMsg = msg as AssistantMessage;
-				if (assistantMsg.stopReason !== "aborted") {
-					lastAssistant = assistantMsg;
-					break;
+		// Prefer usage from session history (full context), fall back to current turn.
+		const entries = sessionManager.loadEntries();
+		const usageFromEntries = getLastAssistantUsage(entries);
+		const usage =
+			usageFromEntries ??
+			(() => {
+				const messages = agent.state.messages;
+				for (let i = messages.length - 1; i >= 0; i--) {
+					const msg = messages[i];
+					if (msg.role === "assistant") {
+						const assistantMsg = msg as AssistantMessage;
+						if (assistantMsg.stopReason !== "aborted" && assistantMsg.usage) {
+							return assistantMsg.usage;
+						}
+					}
 				}
-			}
-		}
-		if (!lastAssistant) return;
+				return null;
+			})();
+		if (!usage) return;
 
-		const contextTokens = calculateContextTokens(lastAssistant.usage);
+		const contextTokens = calculateContextTokens(usage);
 		const contextWindow = agent.state.model.contextWindow;
 
 		if (!shouldCompact(contextTokens, contextWindow, settings)) return;
