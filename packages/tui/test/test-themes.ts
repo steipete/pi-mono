@@ -2,10 +2,10 @@
  * Default themes for TUI tests using chalk
  */
 
-import { Chalk } from "chalk";
+import chalkModule from "chalk";
 import type { EditorTheme, MarkdownTheme, SelectListTheme } from "../src/index.js";
 
-const chalk = new Chalk({ level: 3 });
+const chalk = new chalkModule.Instance({ level: 3 });
 
 export const defaultSelectListTheme: SelectListTheme = {
 	selectedPrefix: (text: string) => chalk.blue(text),

@@ -1,11 +1,11 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { Chalk } from "chalk";
+import chalkModule from "chalk";
 import { Markdown } from "../src/components/markdown.js";
 import { defaultMarkdownTheme } from "./test-themes.js";
 
 // Force full color in CI so ANSI assertions are deterministic
-const chalk = new Chalk({ level: 3 });
+const chalk = new chalkModule.Instance({ level: 3 });
 
 describe("Markdown component", () => {
 	describe("Nested lists", () => {
