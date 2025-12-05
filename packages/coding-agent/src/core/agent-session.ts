@@ -18,7 +18,7 @@ import type { AssistantMessage, Message, Model, TextContent } from "@mariozechne
 import { isContextOverflow, supportsXhigh } from "@mariozechner/pi-ai";
 import { getModelsPath } from "../config.js";
 import { type BashResult, executeBash as executeBashCommand } from "./bash-executor.js";
-import { calculateContextTokens, compact, shouldCompact } from "./compaction.js";
+import { calculateContextTokens, compact, getLastAssistantUsage, shouldCompact } from "./compaction.js";
 import type { LoadedCustomTool, SessionEvent as ToolSessionEvent } from "./custom-tools/index.js";
 import { exportSessionToHtml } from "./export-html.js";
 import type { BranchEventResult, HookRunner, TurnEndEvent, TurnStartEvent } from "./hooks/index.js";
@@ -799,7 +799,12 @@ export class AgentSession {
 		// Skip if this was an error (non-overflow errors don't have usage data)
 		if (assistantMessage.stopReason === "error") return;
 
-		const contextTokens = calculateContextTokens(assistantMessage.usage);
+		// Base threshold compaction on persisted session history usage (not the live message payload),
+		// to avoid drift when message normalization/validation alters the in-context content.
+		const lastUsage = getLastAssistantUsage(this.sessionManager.loadEntries());
+		if (!lastUsage) return;
+
+		const contextTokens = calculateContextTokens(lastUsage);
 		if (shouldCompact(contextTokens, contextWindow, settings)) {
 			await this._runAutoCompaction("threshold", false);
 		}
