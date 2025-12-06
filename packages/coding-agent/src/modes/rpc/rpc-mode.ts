@@ -13,6 +13,7 @@
 
 import * as crypto from "node:crypto";
 import * as readline from "readline";
+import type { Attachment } from "@mariozechner/pi-agent-core";
 import type { AgentSession } from "../../core/agent-session.js";
 import type { HookUIContext } from "../../core/hooks/index.js";
 import type { RpcCommand, RpcHookUIRequest, RpcHookUIResponse, RpcResponse, RpcSessionState } from "./rpc-types.js";
@@ -42,6 +43,45 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 
 	const error = (id: string | undefined, command: string, message: string): RpcResponse => {
 		return { id, type: "response", command, success: false, error: message };
+	};
+
+	const normalizePromptInput = (
+		rawMessage: unknown,
+		fallbackAttachments?: Attachment[],
+	): { promptText: string; attachments?: Attachment[] } => {
+		if (typeof rawMessage === "string") {
+			return { promptText: rawMessage, attachments: fallbackAttachments };
+		}
+
+		if (!rawMessage || typeof rawMessage !== "object") {
+			return { promptText: String(rawMessage ?? "").trim(), attachments: fallbackAttachments };
+		}
+
+		const msg = rawMessage as { content?: unknown; attachments?: Attachment[] };
+		const rawContent = msg.content;
+
+		let contentArray: Array<{ type?: unknown; text?: unknown }> = [];
+		if (Array.isArray(rawContent)) {
+			contentArray = rawContent.map((c) => {
+				if (!c || typeof c !== "object") return { type: "text", text: String(c ?? "") };
+				const block = c as { type?: unknown; text?: unknown };
+				if (block.type === "text" && typeof block.text !== "string") {
+					return { ...block, text: String(block.text ?? "") };
+				}
+				return block;
+			});
+		} else if (rawContent != null) {
+			contentArray = [{ type: "text", text: String(rawContent) }];
+		}
+
+		const promptText =
+			contentArray
+				.filter((c) => c.type === "text" && typeof c.text === "string")
+				.map((c) => c.text)
+				.join("\n")
+				.trim() || "";
+
+		return { promptText, attachments: msg.attachments ?? fallbackAttachments };
 	};
 
 	// Pending hook UI requests waiting for response
@@ -184,10 +224,14 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			// =================================================================
 
 			case "prompt": {
+				const { promptText, attachments } = normalizePromptInput(
+					(command as unknown as { message?: unknown }).message,
+					command.attachments,
+				);
 				// Don't await - events will stream
 				session
-					.prompt(command.message, {
-						attachments: command.attachments,
+					.prompt(promptText, {
+						attachments,
 						expandSlashCommands: false,
 					})
 					.catch((e) => output(error(id, "prompt", e.message)));

@@ -163,6 +163,8 @@
 
 - Detect image MIME type via file magic (read tool and `@file` attachments), not filename extension.
 
+- RPC `prompt` input is normalized to flatten text blocks and coerce non-string text values, preventing malformed content from reaching the agent.
+
 - Fixed markdown tables overflowing terminal width. Tables now wrap cell contents to fit available width instead of breaking borders mid-row. ([#206](https://github.com/badlogic/pi-mono/pull/206) by [@kim0](https://github.com/kim0))
 
 ## [0.23.1] - 2025-12-17
@@ -184,7 +186,6 @@
 ### Breaking Changes
 
 - **Hooks**: Replaced `session_start` and `session_switch` events with unified `session` event. Use `event.reason` (`"start" | "switch" | "clear"`) to distinguish. Event now includes `entries` array for state reconstruction.
-
 ## [0.22.5] - 2025-12-17
 
 ### Fixed
@@ -426,7 +427,6 @@ _Dedicated to Peter's shoulder ([@steipete](https://twitter.com/steipete))_
 ### Fixed
 
 - **Editor crash with emojis/CJK characters**: Fixed crash when pasting or typing text containing wide characters (emojis like ✅, CJK characters) that caused line width to exceed terminal width. The editor now uses grapheme-aware text wrapping with proper visible width calculation.
-
 ## [0.12.14] - 2025-12-06
 
 ### Added
