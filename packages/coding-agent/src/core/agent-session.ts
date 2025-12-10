@@ -867,9 +867,12 @@ export class AgentSession {
 
 				// Use setTimeout to break out of the event handler chain
 				setTimeout(() => {
-					this.agent.continue().catch(() => {
-						// Retry failed - silently ignore, user can manually retry
-					});
+					const retry = (this.agent as any).continue as (() => Promise<void>) | undefined;
+					if (retry) {
+						retry().catch(() => {
+							// Retry failed - silently ignore, user can manually retry
+						});
+					}
 				}, 100);
 			}
 		} catch (error) {

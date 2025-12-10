@@ -26,7 +26,7 @@ export interface Settings {
 	lastChangelogVersion?: string;
 	defaultProvider?: string;
 	defaultModel?: string;
-	defaultThinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+	defaultThinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
 	queueMode?: "all" | "one-at-a-time";
 	theme?: string;
 	compaction?: CompactionSettings;
@@ -144,11 +144,11 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getDefaultThinkingLevel(): "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined {
+	getDefaultThinkingLevel(): "off" | "minimal" | "low" | "medium" | "high" | undefined {
 		return this.settings.defaultThinkingLevel;
 	}
 
-	setDefaultThinkingLevel(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"): void {
+	setDefaultThinkingLevel(level: "off" | "minimal" | "low" | "medium" | "high"): void {
 		this.settings.defaultThinkingLevel = level;
 		this.save();
 	}

@@ -27,7 +27,7 @@ export interface Attachment {
  * Thinking/reasoning level for models that support it.
  * Note: "xhigh" is only supported by OpenAI gpt-5.1-codex-max, gpt-5.2, and gpt-5.2-codex models.
  */
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
 
 /**
  * User message with optional attachments.

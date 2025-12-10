@@ -36,7 +36,7 @@ export interface Args {
 	fileArgs: string[];
 }
 
-const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"] as const;
 
 export function isValidThinkingLevel(level: string): level is ThinkingLevel {
 	return VALID_THINKING_LEVELS.includes(level as ThinkingLevel);
@@ -160,7 +160,7 @@ ${chalk.bold("Options:")}
                                  Available: read, bash, edit, write, grep, find, ls, process
   --streaming-tools              Enable the process tool for background job management
   --no-streaming-tools           Disable the process tool
-  --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
+  --thinking <level>             Set thinking level: off, minimal, low, medium, high
   --hook <path>                  Load a hook file (can be used multiple times)
   --tool <path>                  Load a custom tool file (can be used multiple times)
   --no-skills                    Disable skills discovery and loading
