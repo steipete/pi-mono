@@ -1,7 +1,7 @@
 import type { AgentState, AppMessage } from "@mariozechner/pi-agent-core";
 import { randomBytes } from "crypto";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "fs";
-import { join, resolve } from "path";
+import { basename, join, resolve } from "path";
 import { getAgentDir } from "../config.js";
 
 function uuidv4(): string {
@@ -216,16 +216,12 @@ export class SessionManager {
 		this.sessionDir = this.getSessionDirectory();
 
 		if (customSessionPath) {
-			// Use custom session file path
+			// Use custom session file path. Ensure stable sessionId derived from path/header so
+			// embedding hosts (e.g., Clawdis) get a consistent id instead of a new UUID each run.
 			this.sessionFile = resolve(customSessionPath);
-			this.loadSessionId();
-			// If file doesn't exist, loadSessionId() won't set sessionId, so generate one
-			if (!this.sessionId) {
-				this.sessionId = uuidv4();
-			}
-			// Mark as initialized since we're loading an existing session
+			this.sessionId =
+				this.peekSessionId(this.sessionFile) || this.deriveSessionIdFromPath(this.sessionFile) || uuidv4();
 			this.sessionInitialized = existsSync(this.sessionFile);
-			// Load entries into memory
 			if (this.sessionInitialized) {
 				this.inMemoryEntries = this.loadEntriesFromFile();
 			}
@@ -300,14 +296,49 @@ export class SessionManager {
 		}
 	}
 
+	private peekSessionId(filePath: string): string | null {
+		if (!existsSync(filePath)) return null;
+		try {
+			const lines = readFileSync(filePath, "utf8").trim().split("\n");
+			for (const line of lines) {
+				if (!line.trim()) continue;
+				try {
+					const entry = JSON.parse(line);
+					if (entry.type === "session" && typeof entry.id === "string") {
+						return entry.id;
+					}
+				} catch {
+					// ignore malformed lines
+				}
+			}
+		} catch {
+			// ignore read errors
+		}
+		return null;
+	}
+
+	private deriveSessionIdFromPath(filePath: string): string | null {
+		if (!filePath) return null;
+		const base = basename(filePath, ".jsonl");
+		return base && base.length > 0 ? base : null;
+	}
+
+	/**
+	 * Load session id from file header when present, otherwise derive from path or fall back to uuid.
+	 * Keeps ids stable for custom --session paths used by embedding hosts.
+	 */
 	private loadSessionId(): void {
-		if (!existsSync(this.sessionFile)) return;
+		if (!existsSync(this.sessionFile)) {
+			this.sessionId = this.deriveSessionIdFromPath(this.sessionFile) ?? uuidv4();
+			return;
+		}
 
 		const lines = readFileSync(this.sessionFile, "utf8").trim().split("\n");
 		for (const line of lines) {
+			if (!line.trim()) continue;
 			try {
 				const entry = JSON.parse(line);
-				if (entry.type === "session") {
+				if (entry.type === "session" && typeof entry.id === "string") {
 					this.sessionId = entry.id;
 					return;
 				}
@@ -315,7 +346,8 @@ export class SessionManager {
 				// Skip malformed lines
 			}
 		}
-		this.sessionId = uuidv4();
+
+		this.sessionId = this.deriveSessionIdFromPath(this.sessionFile) ?? uuidv4();
 	}
 
 	startSession(state: AgentState): void {
