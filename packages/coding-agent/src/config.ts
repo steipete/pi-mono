@@ -56,8 +56,13 @@ export function getThemesDir(): string {
 	}
 	// Theme is in modes/interactive/theme/ relative to src/ or dist/
 	const packageDir = getPackageDir();
-	const srcOrDist = existsSync(join(packageDir, "src")) ? "src" : "dist";
-	return join(packageDir, srcOrDist, "modes", "interactive", "theme");
+	// When running from compiled dist with an embedded package.json (dist/package.json),
+	// packageDir may already be .../dist. Avoid adding an extra /dist in that case.
+	const baseDir = basename(packageDir) === "dist" ? packageDir : packageDir;
+	const srcOrDist = basename(baseDir) === "dist" ? "" : existsSync(join(baseDir, "src")) ? "src" : "dist";
+	return srcOrDist
+		? join(baseDir, srcOrDist, "modes", "interactive", "theme")
+		: join(baseDir, "modes", "interactive", "theme");
 }
 
 /** Get path to package.json */
