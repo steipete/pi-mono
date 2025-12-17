@@ -84,6 +84,8 @@ export class InteractiveMode {
 
 	// Tool execution tracking: toolCallId -> component
 	private pendingTools = new Map<string, ToolExecutionComponent>();
+	// Streaming tool output: toolCallId -> accumulated output
+	private toolOutputBuffers = new Map<string, string>();
 	// Soft-yield handles: toolCallId -> requestYield
 	private toolYieldHandles = new Map<string, () => void>();
 	private lastYieldToolCallId: string | null = null;
@@ -851,92 +853,106 @@ export class InteractiveMode {
 					const assistantMsg = event.message as AssistantMessage;
 					this.streamingComponent.updateContent(assistantMsg);
 
-						if (assistantMsg.stopReason === "aborted" || assistantMsg.stopReason === "error") {
-							const errorMessage =
-								assistantMsg.stopReason === "aborted" ? "Operation aborted" : assistantMsg.errorMessage || "Error";
-							for (const [, component] of this.pendingTools.entries()) {
-								component.updateResult({
-									content: [{ type: "text", text: errorMessage }],
-									isError: true,
-								});
-							}
-							this.pendingTools.clear();
-							this.toolYieldHandles.clear();
-							this.lastYieldToolCallId = null;
+					if (assistantMsg.stopReason === "aborted" || assistantMsg.stopReason === "error") {
+						const errorMessage =
+							assistantMsg.stopReason === "aborted" ? "Operation aborted" : assistantMsg.errorMessage || "Error";
+						for (const [, component] of this.pendingTools.entries()) {
+							component.updateResult({
+								content: [{ type: "text", text: errorMessage }],
+								isError: true,
+							});
 						}
+						this.pendingTools.clear();
+						this.toolOutputBuffers.clear();
+						this.toolYieldHandles.clear();
+						this.lastYieldToolCallId = null;
+					}
 					this.streamingComponent = null;
 					this.footer.invalidate();
 				}
 				this.ui.requestRender();
 				break;
 
-				case "tool_execution_start": {
-					if (!this.pendingTools.has(event.toolCallId)) {
-						const component = new ToolExecutionComponent(
-							event.toolName,
-							event.args,
-							{
-								showImages: this.settingsManager.getShowImages(),
-							},
-							this.customTools.get(event.toolName)?.tool,
-						);
-						this.chatContainer.addChild(component);
-						this.pendingTools.set(event.toolCallId, component);
-						this.lastYieldToolCallId = event.toolCallId;
-						this.ui.requestRender();
-					}
-					break;
-				}
-
-				case "tool_execution_handle": {
-					this.toolYieldHandles.set(event.toolCallId, event.requestYield);
-					this.lastYieldToolCallId = event.toolCallId;
-					break;
-				}
-
-				case "tool_execution_progress": {
-					void this.refreshBackgroundCount();
-					break;
-				}
-
-				case "tool_execution_update": {
-					const component = this.pendingTools.get(event.toolCallId);
-					if (component) {
-						component.updateResult({ ...event.partialResult, isError: false }, true);
-						this.ui.requestRender();
-					}
-					break;
-				}
-
-				case "tool_execution_end": {
-					const component = this.pendingTools.get(event.toolCallId);
-					if (component) {
-						component.updateResult({ ...event.result, isError: event.isError });
-						this.pendingTools.delete(event.toolCallId);
-						this.toolYieldHandles.delete(event.toolCallId);
-						if (this.lastYieldToolCallId === event.toolCallId) {
-							this.lastYieldToolCallId = null;
-						}
-						this.ui.requestRender();
-					}
-					break;
-				}
-
-				case "agent_end":
-					if (this.loadingAnimation) {
-						this.loadingAnimation.stop();
-						this.loadingAnimation = null;
-						this.statusContainer.clear();
-					}
-					if (this.streamingComponent) {
-						this.chatContainer.removeChild(this.streamingComponent);
-						this.streamingComponent = null;
-					}
-					this.pendingTools.clear();
-					this.toolYieldHandles.clear();
-					this.lastYieldToolCallId = null;
+			case "tool_execution_start": {
+				if (!this.pendingTools.has(event.toolCallId)) {
+					this.toolOutputBuffers.set(event.toolCallId, "");
+					const component = new ToolExecutionComponent(
+						event.toolName,
+						event.args,
+						{
+							showImages: this.settingsManager.getShowImages(),
+						},
+						this.customTools.get(event.toolName)?.tool,
+					);
+					this.chatContainer.addChild(component);
+					this.pendingTools.set(event.toolCallId, component);
 					this.ui.requestRender();
-					break;
+				}
+				break;
+			}
+
+			case "tool_execution_handle": {
+				this.toolYieldHandles.set(event.toolCallId, event.requestYield);
+				this.lastYieldToolCallId = event.toolCallId;
+				break;
+			}
+
+			case "tool_execution_progress": {
+				void this.refreshBackgroundCount();
+				break;
+			}
+
+			case "tool_execution_output": {
+				const component = this.pendingTools.get(event.toolCallId);
+				if (component) {
+					const prev = this.toolOutputBuffers.get(event.toolCallId) ?? "";
+					const next = prev + event.chunk;
+					// Keep memory bounded for long-running tools
+					const maxChars = 50_000;
+					this.toolOutputBuffers.set(event.toolCallId, next.length > maxChars ? next.slice(-maxChars) : next);
+					component.updateResult(
+						{
+							content: [{ type: "text", text: this.toolOutputBuffers.get(event.toolCallId) ?? "" }],
+							isError: false,
+						},
+						true,
+					);
+					this.ui.requestRender();
+				}
+				break;
+			}
+
+			case "tool_execution_end": {
+				const component = this.pendingTools.get(event.toolCallId);
+				if (component) {
+					component.updateResult({ ...event.result, isError: event.isError });
+					this.pendingTools.delete(event.toolCallId);
+					this.toolOutputBuffers.delete(event.toolCallId);
+					this.toolYieldHandles.delete(event.toolCallId);
+					if (this.lastYieldToolCallId === event.toolCallId) {
+						this.lastYieldToolCallId = null;
+					}
+					this.ui.requestRender();
+				}
+				break;
+			}
+
+			case "agent_end":
+				if (this.loadingAnimation) {
+					this.loadingAnimation.stop();
+					this.loadingAnimation = null;
+					this.statusContainer.clear();
+				}
+				if (this.streamingComponent) {
+					this.chatContainer.removeChild(this.streamingComponent);
+					this.streamingComponent = null;
+				}
+				this.pendingTools.clear();
+				this.toolOutputBuffers.clear();
+				this.toolYieldHandles.clear();
+				this.lastYieldToolCallId = null;
+				this.ui.requestRender();
+				break;
 
 			case "auto_compaction_start": {
 				// Disable submit to preserve editor text during compaction
