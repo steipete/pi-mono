@@ -90,6 +90,8 @@ export class InteractiveMode {
 
 	// Tool execution tracking: toolCallId -> component
 	private pendingTools = new Map<string, ToolExecutionComponent>();
+	// Streaming tool output: toolCallId -> accumulated output
+	private toolOutputBuffers = new Map<string, string>();
 	// Soft-yield handles: toolCallId -> requestYield
 	private toolYieldHandles = new Map<string, () => void>();
 	private lastYieldToolCallId: string | null = null;
@@ -878,6 +880,7 @@ export class InteractiveMode {
 							});
 						}
 						this.pendingTools.clear();
+						this.toolOutputBuffers.clear();
 						this.toolYieldHandles.clear();
 						this.lastYieldToolCallId = null;
 					}
@@ -889,6 +892,7 @@ export class InteractiveMode {
 
 			case "tool_execution_start": {
 				if (!this.pendingTools.has(event.toolCallId)) {
+					this.toolOutputBuffers.set(event.toolCallId, "");
 					const component = new ToolExecutionComponent(
 						event.toolName,
 						event.args,
@@ -917,6 +921,26 @@ export class InteractiveMode {
 				break;
 			}
 
+			case "tool_execution_output": {
+				const component = this.pendingTools.get(event.toolCallId);
+				if (component) {
+					const prev = this.toolOutputBuffers.get(event.toolCallId) ?? "";
+					const next = prev + event.chunk;
+					// Keep memory bounded for long-running tools
+					const maxChars = 50_000;
+					this.toolOutputBuffers.set(event.toolCallId, next.length > maxChars ? next.slice(-maxChars) : next);
+					component.updateResult(
+						{
+							content: [{ type: "text", text: this.toolOutputBuffers.get(event.toolCallId) ?? "" }],
+							isError: false,
+						},
+						true,
+					);
+					this.ui.requestRender();
+				}
+				break;
+			}
+
 			case "tool_execution_update": {
 				const component = this.pendingTools.get(event.toolCallId);
 				if (component) {
@@ -931,6 +955,7 @@ export class InteractiveMode {
 				if (component) {
 					component.updateResult({ ...event.result, isError: event.isError });
 					this.pendingTools.delete(event.toolCallId);
+					this.toolOutputBuffers.delete(event.toolCallId);
 					this.toolYieldHandles.delete(event.toolCallId);
 					if (this.lastYieldToolCallId === event.toolCallId) {
 						this.lastYieldToolCallId = null;
@@ -951,6 +976,7 @@ export class InteractiveMode {
 					this.streamingComponent = null;
 				}
 				this.pendingTools.clear();
+				this.toolOutputBuffers.clear();
 				this.toolYieldHandles.clear();
 				this.lastYieldToolCallId = null;
 				this.ui.requestRender();
