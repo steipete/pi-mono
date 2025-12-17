@@ -258,61 +258,61 @@ async function executeToolCalls<T>(
 		const toolCall = toolCalls[index];
 		const tool = tools?.find((t) => t.name === toolCall.name);
 
-			stream.push({
-				type: "tool_execution_start",
-				toolCallId: toolCall.id,
-				toolName: toolCall.name,
-				args: toolCall.arguments,
+		stream.push({
+			type: "tool_execution_start",
+			toolCallId: toolCall.id,
+			toolName: toolCall.name,
+			args: toolCall.arguments,
+		});
+
+		// Soft-yield controller (distinct from abort)
+		const yieldController = new AbortController();
+		stream.push({
+			type: "tool_execution_handle",
+			toolCallId: toolCall.id,
+			requestYield: () => yieldController.abort(),
+		});
+
+		let result: AgentToolResult<T>;
+		let isError = false;
+
+		try {
+			if (!tool) throw new Error(`Tool ${toolCall.name} not found`);
+
+			// Validate arguments using shared validation function
+			const validatedArgs = validateToolArguments(tool, toolCall);
+
+			// Execute with validated, typed arguments
+			result = await tool.execute(toolCall.id, validatedArgs, {
+				signal,
+				emitEvent: (event) => stream.push(event),
+				yieldSignal: yieldController.signal,
 			});
+		} catch (e) {
+			result = {
+				content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
+				details: toolCall.arguments as T,
+			};
+			isError = true;
+		}
 
-			// Soft-yield controller (distinct from abort)
-			const yieldController = new AbortController();
-			stream.push({
-				type: "tool_execution_handle",
-				toolCallId: toolCall.id,
-				requestYield: () => yieldController.abort(),
-			});
-
-			let result: AgentToolResult<T>;
-			let isError = false;
-
-			try {
-				if (!tool) throw new Error(`Tool ${toolCall.name} not found`);
-
-				// Validate arguments using shared validation function
-				const validatedArgs = validateToolArguments(tool, toolCall);
-
-				// Execute with validated, typed arguments
-				result = await tool.execute(toolCall.id, validatedArgs, {
-					signal,
-					emitEvent: (event) => stream.push(event),
-					yieldSignal: yieldController.signal,
-				});
-				} catch (e) {
-					result = {
-						content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
-						details: toolCall.arguments as T,
-					};
-					isError = true;
-				}
-
-			stream.push({
+		stream.push({
 			type: "tool_execution_end",
 			toolCallId: toolCall.id,
 			toolName: toolCall.name,
-				result,
-				isError,
-			});
+			result,
+			isError,
+		});
 
-			const toolResultMessage: ToolResultMessage<T> = {
-				role: "toolResult",
-				toolCallId: toolCall.id,
-				toolName: toolCall.name,
-				content: result.content,
-				details: (isError ? toolCall.arguments : (result.details ?? toolCall.arguments)) as T,
-				isError,
-				timestamp: Date.now(),
-			};
+		const toolResultMessage: ToolResultMessage<T> = {
+			role: "toolResult",
+			toolCallId: toolCall.id,
+			toolName: toolCall.name,
+			content: result.content,
+			details: (isError ? toolCall.arguments : (result.details ?? toolCall.arguments)) as T,
+			isError,
+			timestamp: Date.now(),
+		};
 
 		results.push(toolResultMessage);
 		stream.push({ type: "message_start", message: toolResultMessage });

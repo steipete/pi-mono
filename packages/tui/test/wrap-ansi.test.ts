@@ -1,11 +1,11 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import chalkModule from "chalk";
+import { Chalk } from "chalk";
 
 // We'll implement these
 import { applyBackgroundToLine, visibleWidth, wrapTextWithAnsi } from "../src/utils.js";
 
-const chalk = new chalkModule.Instance({ level: 3 });
+const chalk = new Chalk({ level: 3 });
 
 describe("wrapTextWithAnsi", () => {
 	it("wraps plain text at word boundaries", () => {

@@ -47,8 +47,8 @@ import { DynamicBorder } from "./components/dynamic-border.js";
 import { FooterComponent } from "./components/footer.js";
 import { HookInputComponent } from "./components/hook-input.js";
 import { HookSelectorComponent } from "./components/hook-selector.js";
-import { JobLogView, type JobLogMeta } from "./components/job-log-view.js";
-import { JobsSelectorComponent, type JobItem } from "./components/jobs-selector.js";
+import { type JobLogMeta, JobLogView } from "./components/job-log-view.js";
+import { type JobItem, JobsSelectorComponent } from "./components/jobs-selector.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
 import { OAuthSelectorComponent } from "./components/oauth-selector.js";
 import { QueueModeSelectorComponent } from "./components/queue-mode-selector.js";
@@ -232,17 +232,17 @@ export class InteractiveMode {
 			theme.fg("dim", "ctrl+p") +
 			theme.fg("muted", " to cycle models") +
 			"\n" +
-				theme.fg("dim", "ctrl+o") +
-				theme.fg("muted", " to expand tools") +
-				"\n" +
-				theme.fg("dim", "ctrl+b") +
-				theme.fg("muted", " to background tool") +
-				"\n" +
-				theme.fg("dim", "ctrl+t") +
-				theme.fg("muted", " to toggle thinking") +
-				"\n" +
-				theme.fg("dim", "/") +
-				theme.fg("muted", " for commands") +
+			theme.fg("dim", "ctrl+o") +
+			theme.fg("muted", " to expand tools") +
+			"\n" +
+			theme.fg("dim", "ctrl+b") +
+			theme.fg("muted", " to background tool") +
+			"\n" +
+			theme.fg("dim", "ctrl+t") +
+			theme.fg("muted", " to toggle thinking") +
+			"\n" +
+			theme.fg("dim", "/") +
+			theme.fg("muted", " for commands") +
 			"\n" +
 			theme.fg("dim", "!") +
 			theme.fg("muted", " to run bash") +
@@ -587,16 +587,16 @@ export class InteractiveMode {
 			}
 		};
 
-			this.editor.onCtrlC = () => this.handleCtrlC();
-			this.editor.onCtrlD = () => this.handleCtrlD();
-			this.editor.onShiftTab = () => this.cycleThinkingLevel();
-			this.editor.onCtrlP = () => this.cycleModel();
-			this.editor.onCtrlO = () => this.toggleToolOutputExpansion();
-			this.editor.onCtrlB = () => this.handleCtrlB();
-			this.editor.onCtrlT = () => this.toggleThinkingBlockVisibility();
-			this.editor.onArrowDown = () => {
-				void this.handleJobsCommand();
-			};
+		this.editor.onCtrlC = () => this.handleCtrlC();
+		this.editor.onCtrlD = () => this.handleCtrlD();
+		this.editor.onShiftTab = () => this.cycleThinkingLevel();
+		this.editor.onCtrlP = () => this.cycleModel();
+		this.editor.onCtrlO = () => this.toggleToolOutputExpansion();
+		this.editor.onCtrlT = () => this.toggleThinkingBlockVisibility();
+		this.editor.onCtrlB = () => this.handleCtrlB();
+		this.editor.onArrowDown = () => {
+			void this.handleJobsCommand();
+		};
 
 		this.editor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -730,10 +730,10 @@ export class InteractiveMode {
 				return;
 			}
 
-				// Handle bash command
-				if (text.startsWith("!")) {
-					const command = text.slice(1).trim();
-					if (command) {
+			// Handle bash command
+			if (text.startsWith("!")) {
+				const command = text.slice(1).trim();
+				if (command) {
 					if (this.session.isBashRunning) {
 						this.showWarning("A bash command is already running. Press Esc to cancel it first.");
 						this.editor.setText(text);
@@ -792,12 +792,12 @@ export class InteractiveMode {
 					this.loadingAnimation.stop();
 				}
 				this.statusContainer.clear();
-					this.loadingAnimation = new Loader(
-						this.ui,
-						(spinner) => theme.fg("accent", spinner),
-						(text) => theme.fg("muted", text),
-						"Working... (esc to interrupt, ctrl+b to background)",
-					);
+				this.loadingAnimation = new Loader(
+					this.ui,
+					(spinner) => theme.fg("accent", spinner),
+					(text) => theme.fg("muted", text),
+					"Working... (esc to interrupt, ctrl+b to background)",
+				);
 				this.statusContainer.addChild(this.loadingAnimation);
 				this.ui.requestRender();
 				break;
@@ -1226,7 +1226,9 @@ export class InteractiveMode {
 
 	private handleCtrlB(): void {
 		const preferredId =
-			this.lastYieldToolCallId && this.toolYieldHandles.has(this.lastYieldToolCallId) ? this.lastYieldToolCallId : null;
+			this.lastYieldToolCallId && this.toolYieldHandles.has(this.lastYieldToolCallId)
+				? this.lastYieldToolCallId
+				: null;
 		const fallbackId = this.toolYieldHandles.keys().next().value as string | undefined;
 		const toolCallId = preferredId || fallbackId;
 
@@ -2182,7 +2184,11 @@ export class InteractiveMode {
 				truncated: typeof truncated === "boolean" ? truncated : false,
 				exitCode: typeof exitCode === "number" || exitCode === null ? exitCode : undefined,
 				exitSignal:
-					typeof exitSignal === "string" || typeof exitSignal === "number" || exitSignal === null ? exitSignal : undefined,
+					typeof exitSignal === "number" || exitSignal === null
+						? exitSignal
+						: typeof exitSignal === "string"
+							? (exitSignal as NodeJS.Signals)
+							: undefined,
 			});
 		}
 

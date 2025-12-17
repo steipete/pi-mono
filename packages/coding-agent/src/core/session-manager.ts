@@ -82,18 +82,22 @@ export const SUMMARY_SUFFIX = `
 
 function sanitizeMessage(message: AppMessage): AppMessage {
 	if (!message) return message;
-	if (Array.isArray((message as any).content)) {
-		const content = (message as any).content.map((c: any) => {
+	const hasRoleAndContent = typeof (message as { role?: unknown }).role === "string" && "content" in (message as any);
+	if (!hasRoleAndContent) return message;
+
+	const rawContent = (message as { content?: unknown }).content;
+	if (Array.isArray(rawContent)) {
+		const content = rawContent.map((c: any) => {
 			if (c?.type === "text" && typeof c.text !== "string") {
 				return { ...c, text: String(c.text ?? "") };
 			}
 			return c;
 		});
-		return { ...message, content };
+		return { ...(message as any), content };
 	}
-	const raw = (message as any).content;
-	const text = typeof raw === "string" ? raw : raw != null ? String(raw) : "";
-	return { ...message, content: [{ type: "text", text }] as any };
+	if (typeof rawContent === "string") return message;
+	const text = rawContent != null ? String(rawContent) : "";
+	return { ...(message as any), content: [{ type: "text", text }] };
 }
 
 /**

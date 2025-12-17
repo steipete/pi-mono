@@ -54,20 +54,10 @@ function configureOAuthStorage(): void {
 		},
 	});
 }
-const STREAMING_ONLY_TOOLS: ToolName[] = [
-	"process",
-];
+
+const STREAMING_ONLY_TOOLS: ToolName[] = ["process"];
 const NON_STREAMING_ONLY_TOOLS: ToolName[] = [];
-const DEFAULT_STREAMING_TOOL_NAMES: ToolName[] = [
-	"read",
-	"bash",
-	"edit",
-	"write",
-	"grep",
-	"find",
-	"ls",
-	"process",
-];
+const DEFAULT_STREAMING_TOOL_NAMES: ToolName[] = ["read", "bash", "edit", "write", "grep", "find", "ls", "process"];
 const DEFAULT_NON_STREAMING_TOOL_NAMES: ToolName[] = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 /** Check npm registry for new version (non-blocking) */
 async function checkForNewVersion(currentVersion: string): Promise<string | null> {

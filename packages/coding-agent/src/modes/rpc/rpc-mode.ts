@@ -12,8 +12,8 @@
  */
 
 import * as crypto from "node:crypto";
-import * as readline from "readline";
 import type { Attachment } from "@mariozechner/pi-agent-core";
+import * as readline from "readline";
 import type { AgentSession } from "../../core/agent-session.js";
 import type { HookUIContext } from "../../core/hooks/index.js";
 import type { RpcCommand, RpcHookUIRequest, RpcHookUIResponse, RpcResponse, RpcSessionState } from "./rpc-types.js";
